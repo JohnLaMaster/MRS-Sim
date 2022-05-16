@@ -9,7 +9,7 @@ from collections import OrderedDict
 # from modules.aux.auxiliary import matrix_inverse
 from modules.physics_model.aux.splines import create_splines_linspace
 # from modules.aux.auxiliary import counter
-from modules.physics_model.aux.cubic_hermite_interpolation import CubicHermiteMAkima as CubicHermiteInterp, batch_linspace # CubicHermiteMAkima # CubicHermiteSplines
+from src.interpolate import CubicHermiteMAkima as CubicHermiteInterp#, batch_linspace 
 from modules.physics_model.aux.aux import *
 
 
