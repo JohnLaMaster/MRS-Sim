@@ -1,55 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 from torch.fft import (fft, ifft, fftshift, ifftshift, rfft, irfft)
-version = 'new'
-
-try:
-    from torch.fft import (fft, ifft, fftshift, ifftshift, rfft, irfft)
-    version = 'new'
-except ImportError: 
-    from torch import ifft, fft, rfft, rifft
-    from modules.aux.auxiliary import (fftshift, ifftshift)
-    version = 'old'
+import numpy as np
     
     
-__all__ = ['smooth', 'torch_batch_linspace', 'complex_exp', 'Fourier_Transform', 'inv_Fourier_Transform', 'HilbertTransform']
-
-
-def smooth(x: torch.Tensor,
-           window_len: float: 0.1,
-           window: str='flat') -> torch.Tensor:
-    w_len = int(x.shape[-1] * window_len)
-    w = torch.ones((1, 1, w_len), dtype=torch.float32)
-    w /= w.sum()
-    out = F.conv1d(input=F.pad(x, (w_len, w_len), mode='reflect'), weight=w)
-    out = out[...,w_len//2:-w_len//2]
-    assert(x.shape==out.shape)
-    return out
-
-# def np_batch_linspace(start, stop, length):
-#     stop = stop.unsqueeze(-1) if stop.ndim==2 else stop
-#     assert(start.shape[0]==stop.shape[0])
-#     for _ in range(3-start.ndim): start = start.unsqueeze(-1)
-#     start = np.expand_dims(start.expand_as(stop)
-#     out = np.arange(0, steps).expand([int(start.numel()), 1, int(steps)]).clone().float()
-#     delta = stop.clone() - start.clone()
-#     out *= delta.float()
-#     out /= (steps - 1)
-#     out += start
-#     out[...,-1] = stop[...,-1]
-#     return out
-#     
-#     test = np.ones_like(length)
-#     if test.sum() != 1: assert(start.shape[0]==length.shape[0])
-#     else: length = length.repeat(start.shape[0])
-# 
-#     out = []
-#     for i in range(start.shape[0]):
-#         out.append(np.linspace(start[i], stop[i], length[i]))
-# 
-#     return np.concatenate(out,axis=0).reshape(start.shape[0],-1)
+__all__ = ['complex_exp', 'convertdict', 'Fourier_Transform', 'HilbertTransform', 
+           'inv_Fourier_Transform', 'smooth', 'torch_batch_linspace', ]
 
 
 def complex_exp(signal: torch.Tensor, 
@@ -73,21 +30,45 @@ def complex_exp(signal: torch.Tensor,
     return torch.cat([real.unsqueeze(1), imag.unsqueeze(1)], dim=-2)
 
 
+def convertdict(file, simple=False, device='cpu'):
+    from types import SimpleNamespace
+    import numpy as np
+    if simple:
+        p = SimpleNamespace(**file) # self.basisSpectra
+        keys = [y for y in dir(p) if not y.startswith('__')]
+        for i in range(len(keys)):
+            file[keys[i]] = torch.FloatTensor(np.asarray(file[keys[i]], dtype=np.float32)).squeeze().to(device)
+        return SimpleNamespace(**file)
+    else:
+        delete = []
+        for k, v in file.items():
+            if not k.startswith('__') and not ('None' in k):
+                if isinstance(v, dict):
+                    for kk, vv in file[k].items():
+                        file[k][kk] = torch.FloatTensor(np.asarray(file[k][kk], dtype=np.float32)).squeeze().to(device)
+                elif k=='linenames':
+                    file[k] = dict({str(a): torch.FloatTensor(np.asarray(b, dtype=np.float32)).to(device) for a, b in zip(file[k][0,:], file[k][1,:])})
+                elif k in ['notes', 'seq']: #isinstance(v, str):
+                    delete.append(k)
+                else:
+                    try:
+                        file[k] = torch.FloatTensor(np.asarray(file[k], dtype=np.float32)).squeeze().to(device)
+                    except TypeError:
+                        pass
+            else:
+                delete.append(k)
+        if len(delete)>0:
+            for k in delete:
+                file.pop(k, None)
+        return file
+
+
 def Fourier_Transform(signal: torch.Tensor) -> torch.Tensor: 
     assert(signal.ndim>=3)
     signal = signal.transpose(-1,-2)
     assert(signal.shape[-1]==2)
     signal = torch.view_as_complex(signal.contiguous())
     signal = torch.view_as_real(fftshift(fft(signal, dim=-1), dim=-1)).transpose(-1,-2)
-    return signal.contiguous()
-
-def inv_Fourier_Transform(signal: torch.Tensor, 
-                          normalize: bool=False) -> torch.Tensor:#, 
-    assert(signal.ndim>=3)
-    signal = signal.transpose(-1,-2)
-    assert(signal.shape[-1]==2)
-    signal = torch.view_as_complex(signal.contiguous())
-    signal = torch.view_as_real(ifft(ifftshift(signal, dim=-1),dim=-1)).transpose(-1,-2)
     return signal.contiguous()
 
 
@@ -121,9 +102,32 @@ def HilbertTransform(data: torch.Tensor,
     out = invFourier(a) + mn
     return torch.cat([data, out], dim=1)
 
+
+def inv_Fourier_Transform(signal: torch.Tensor, 
+                          normalize: bool=False) -> torch.Tensor:#, 
+    assert(signal.ndim>=3)
+    signal = signal.transpose(-1,-2)
+    assert(signal.shape[-1]==2)
+    signal = torch.view_as_complex(signal.contiguous())
+    signal = torch.view_as_real(ifft(ifftshift(signal, dim=-1),dim=-1)).transpose(-1,-2)
+    return signal.contiguous()
+
+
+def smooth(x: torch.Tensor,
+           window_len: float: 0.1,
+           window: str='flat') -> torch.Tensor:
+    w_len = int(x.shape[-1] * window_len)
+    w = torch.ones((1, 1, w_len), dtype=torch.float32)
+    w /= w.sum()
+    out = F.conv1d(input=F.pad(x, (w_len, w_len), mode='reflect'), weight=w)
+    out = out[...,w_len//2:-w_len//2]
+    assert(x.shape==out.shape)
+    return out
+
+
 def torch_batch_linspace(start: torch.Tensor, 
-                   stop: torch.Tensor, 
-                   steps: int) -> torch.Tensor:
+                         stop: torch.Tensor, 
+                         steps: int) -> torch.Tensor:
     stop = stop.unsqueeze(-1) if stop.ndim==2 else stop
     for _ in range(3-start.ndim): start = start.unsqueeze(-1)
     start = start.expand_as(stop).to(stop.device)
