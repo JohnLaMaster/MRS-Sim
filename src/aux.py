@@ -100,7 +100,7 @@ def HilbertTransform(data: torch.Tensor,
 
     a = Xf.mul(h)
     out = invFourier(a) + mn
-    return torch.cat([data, out], dim=1)
+    return torch.cat([data, out], dim=-2)
 
 
 def inv_Fourier_Transform(signal: torch.Tensor, 
@@ -116,6 +116,7 @@ def inv_Fourier_Transform(signal: torch.Tensor,
 def smooth(x: torch.Tensor,
            window_len: float: 0.1,
            window: str='flat') -> torch.Tensor:
+    assert(x.ndim==3)
     w_len = int(x.shape[-1] * window_len)
     w = torch.ones((1, 1, w_len), dtype=torch.float32)
     w /= w.sum()
@@ -124,7 +125,7 @@ def smooth(x: torch.Tensor,
     assert(x.shape==out.shape)
     return out
 
-
+# Only works with 3 dimensions. Is it used with transients at any point?
 def torch_batch_linspace(start: torch.Tensor, 
                          stop: torch.Tensor, 
                          steps: int) -> torch.Tensor:
