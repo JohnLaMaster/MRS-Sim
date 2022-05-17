@@ -17,15 +17,15 @@ def complex_exp(signal: torch.Tensor,
     Therefore, the real component is assumed to be zero. If a real component should be used, it must be supplied
     at index = 0 along dimension 1.
     '''
-    theta = theta if theta.shape[1]==2 else torch.cat([torch.zeros_like(theta), theta], dim=1)
+    theta = theta if theta.shape[-2]==2 else torch.cat([torch.zeros_like(theta), theta], dim=-2)
     
     if real: 
-        real = signal.mul(torch.cos(theta[:,1,:].unsqueeze(1)))
-        imag = signal.mul(torch.sin(theta[:,1,:].unsqueeze(1)))
-        return torch.cat([real, imag], dim=1).mul(torch.exp(theta[:,0,:].unsqueeze(1)).expand_as(signal))
+        real = signal.mul(torch.cos(theta[...,1,:].unsqueeze(1)))
+        imag = signal.mul(torch.sin(theta[...,1,:].unsqueeze(1)))
+        return torch.cat([real, imag], dim=-2).mul(torch.exp(theta[...,0,:].unsqueeze(1)).expand_as(signal))
     
-    real = signal[::,0,:].mul(torch.cos(theta[::,1,:])) - signal[::,1,:].mul(torch.sin(theta[::,1,:]))
-    imag = signal[::,0,:].mul(torch.sin(theta[::,1,:])) + signal[::,1,:].mul(torch.cos(theta[::,1,:]))
+    real = signal[...,0,:].mul(torch.cos(theta[...,1,:])) - signal[...,1,:].mul(torch.sin(theta[...,1,:]))
+    imag = signal[...,0,:].mul(torch.sin(theta[...,1,:])) + signal[...,1,:].mul(torch.cos(theta[...,1,:]))
 
     return torch.cat([real.unsqueeze(1), imag.unsqueeze(1)], dim=-2)
 
