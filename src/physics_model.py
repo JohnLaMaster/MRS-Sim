@@ -45,7 +45,7 @@ class PhysicsModel(nn.Module):
                           noise=True in the forward pass
         '''
         # Load basis spectra, concentration ranges, and units
-        paths = ['./dataset/basis_spectra/' + opt.PM_basis_set] # 'fitting_basis_ge_PRESS144.mat'
+        paths = ['./src/basis_spectra/' + opt.PM_basis_set] # 'fitting_basis_ge_PRESS144.mat'
 
         for path in paths:
             with open(path, 'rb') as file:
@@ -364,6 +364,7 @@ class PhysicsModel(nn.Module):
                        fid: torch.Tensor, 
                        param: torch.Tensor,
                        max_val: torch.Tensor,
+                       transients: torch.Tensor=None,
                       ) -> torch.Tensor:
         '''
         RMS coefficient is used because this is done in the time domain with sinusoids
@@ -375,6 +376,8 @@ class PhysicsModel(nn.Module):
         for _ in range(fid.ndim-max_val.ndim): max_val = max_val.unsqueeze(-1)
         for _ in range(fid.ndim-param.ndim): param = param.unsqueeze(-1)
         lin_snr = 10**(param / 10) # convert from decibels to linear scale
+        if not isinstance(transients, type(None)): 
+            lin_snr = lin_snr * torch.sqrt(transients)
         k = 1 / lin_snr # scaling coefficient
         a_signal = torch.FloatTensor([2]).sqrt().pow(-1).to(fid.device) * max_val # RMS coefficient for sine wave
         scale = k * a_signal # signal apmlitude scaled for desired noise amplitude
@@ -595,11 +598,20 @@ class PhysicsModel(nn.Module):
     def transients(self, 
                    fid: torch.Tensor, 
                    params: torch.Tensor,
+                   snr: torch.Tensor,
                   ) -> torch.Tensor:
+        '''
+        The SNR dB value provided is the SNR of the final, coil combined spectrum. Therefore, each of the 
+        transients will have a much higher linear SNR that is dependent upon the expected final SNR and 
+        the number of transients being simulated.
+        '''
         assert(fid.ndim==3)
+        num_transients = params.shape[-1]
         fid = fid.unsqueeze(1).repeat_interleave(repeats=params.shape[-1], dim=1)
+        max_val = fid.max(-1, keepdims=True).values
         for _ in range(fid.ndim - params.ndim): params = params.unsqueeze(-1)
-        return fid * params
+        out = fid * params
+        return out + self.generate_noise(fid, param, max_val, transients=num_transients)
             
 
     def zeroOrderPhase(self, 
