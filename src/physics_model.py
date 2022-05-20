@@ -283,10 +283,11 @@ class PhysicsModel(nn.Module):
     
     def B0_inhomogeneities(self, 
                            fid: torch.Tensor, 
-                           param: torch.Tensor) -> torch.Tensor:
-        for _ in range(fid.ndim - param.ndim): param = param.unsqueeze(-1)
+                           param: torch.Tensor, # hz
+                          ) -> torch.Tensor:
         t = self.t.clone()
         for _ in range(fid.ndim - t.ndim): t = t.unsqueeze(0)
+        for _ in range(fid.ndim - param.ndim): param = param.unsqueeze(-1)
         if t.shape[-1]==1: t = t.t()
         return complex_exp(fid, param * t)
 
@@ -330,6 +331,7 @@ class PhysicsModel(nn.Module):
                        ) -> torch.Tensor:
         # FID should be in the frequency domain for this step
         mult = self.ppm_ref - self._ppm if ppm==None else self.ppm_ref - ppm
+        for _ in range(spectra.ndim - mult.ndim): mult = mult.unsqueeze(0)
         for _ in range(spectra.ndim - phi1.ndim): phi1 = phi1.unsqueeze(-1)
         return complex_exp(spectra, phi1.deg2rad() * mult)
         
@@ -345,7 +347,7 @@ class PhysicsModel(nn.Module):
             
         for _ in range(fid.ndim - param.ndim): param = param.unsqueeze(-1)
         for _ in range(fid.ndim - t.ndim): t = t.unsqueeze(0)
-        f_shift = param.mul(-1.0).mul(t.mT)
+        f_shift = param.mul(t.mT)#.mul(-1.0).mul(t.mT)
         
         # # Convert back to time-domain
          fid = inv_Fourier_Transform(fid)
@@ -387,11 +389,6 @@ class PhysicsModel(nn.Module):
                 spectra: torch.Tensor, 
                 SNR: torch.Tensor,
                ) -> torch.Tensor:
-#         a = torch.FloatTensor([2]).sqrt().pow(-1).to(spectra.device)
-#         b = spectra[:,0,:].max(dim=-1,keepdim=True).values.unsqueeze(-1)
-#         c = b.div(10**SNR / 10)
-#         d = c.pow(2)
-#         print('PhysicsModel.snr_var shape: a.shape {}, b.shape {}, c.shape {}, d.shape {}'.format(a.shape, b.shape, c.shape, d.shape))
         std_noise = torch.FloatTensor([2]).sqrt().pow(-1).to(spectra.device) * spectra[:,0,:].max(dim=-1,keepdim=True).values.unsqueeze(-1).div(10**SNR) / 10
         return std_noise.pow(2)
     
@@ -414,15 +411,16 @@ class PhysicsModel(nn.Module):
                              g: torch.Tensor
                             ) -> torch.Tensor:
         '''
-        Applies Voigt lineshape corrections using a single Gaussian value and separate Lorentzian values
-        for the fat and water peaks 
+        In a Voigt lineshape model, each basis line has its own Lorentzian value. Fat- and Water-based 
+        peaks use one Gaussian value per group.
         '''
+        assert(fid.ndim==3)
         t = self.t.clone().t().unsqueeze(0)
         d = d.unsqueeze(-1).unsqueeze(-1).repeat(1,1,2,1)
         g = g.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand_as(d)
         if d.dtype==torch.float64: d = d.float()
         
-        return fid * torch.exp((-d - g * t.unsqueeze(0)) * t.unsqueeze(0))
+        return fid * torch.exp((-d - g * t.unsqueeze(0)) * t.unsqueeze(0))#d + g * t.unsqueeze(0)) * t.unsqueeze(0))# 
 
     def magnitude(self, 
                   signal: torch.Tensor, 
@@ -597,7 +595,7 @@ class PhysicsModel(nn.Module):
                   ) -> torch.Tensor:
         assert(fid.ndim==3)
         fid = fid.unsqueeze(1).repeat_interleave(repeats=params.shape[-1], dim=1)
-        params = params.unsqueeze(-1).unsqueeze(-1)
+        for _ in range(fid.ndim - params.ndim): params = params.unsqueeze(-1)
         return fid * params
             
 
@@ -605,7 +603,7 @@ class PhysicsModel(nn.Module):
                        fid: torch.Tensor, 
                        phi0: torch.Tensor,
                       ) -> torch.Tensor:
-        for _ in range(fid.ndim-phi0.ndim): phi0 = phi0.unsqueeze(-1)
+        for _ in range(fid.ndim - phi0.ndim): phi0 = phi0.unsqueeze(-1)
         return complex_exp(fid, phi0.deg2rad())
     
 
