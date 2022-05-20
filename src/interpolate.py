@@ -10,8 +10,7 @@ Modified Akima is prefered for general MRS applications as it can reliably handl
 import torch
 import torch.nn as nn
 
-
-__all__ = ['CubicHermiteSplines', 'CubicHermiteMAkima'']
+__all__ = ['CubicHermiteSplines', 'CubicHermiteMAkima']
 
 
 class CubicHermite(nn.Module):
@@ -100,4 +99,3 @@ class CubicHermiteMAkima(CubicHermite):
         
         self.m = (weights2 / weights12) * delta1 + (weights1 / weights12) * delta2
         self.m[(weights12==0)] = 0.
-           

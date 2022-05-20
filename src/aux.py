@@ -1,12 +1,13 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.fft import (fft, ifft, fftshift, ifftshift, rfft, irfft)
-import numpy as np
-    
-    
-__all__ = ['complex_exp', 'convertdict', 'Fourier_Transform', 'HilbertTransform', 
-           'inv_Fourier_Transform', 'smooth', 'torch_batch_linspace', ]
+
+
+# from torch.fft import fft, fftshift, ifft, ifftshift, irfft, rfft
+
+# __all__ = ['complex_exp', 'convertdict', 'Fourier_Transform', 'HilbertTransform', 
+#            'inv_Fourier_Transform', 'smooth', 'torch_batch_linspace', ]
 
 
 def complex_exp(signal: torch.Tensor, 
@@ -63,13 +64,13 @@ def convertdict(file, simple=False, device='cpu'):
         return file
 
 
-def Fourier_Transform(signal: torch.Tensor) -> torch.Tensor: 
-    assert(signal.ndim>=3)
-    signal = signal.transpose(-1,-2)
-    assert(signal.shape[-1]==2)
-    signal = torch.view_as_complex(signal.contiguous())
-    signal = torch.view_as_real(fftshift(fft(signal, dim=-1), dim=-1)).transpose(-1,-2)
-    return signal.contiguous()
+# def Fourier_Transform(signal: torch.Tensor) -> torch.Tensor: 
+#     assert(signal.ndim>=3)
+#     signal = signal.transpose(-1,-2)
+#     assert(signal.shape[-1]==2)
+#     signal = torch.view_as_complex(signal.contiguous())
+#     signal = torch.view_as_real(fftshift(fft(signal, dim=-1), dim=-1)).transpose(-1,-2)
+#     return signal.contiguous()
 
 
 def HilbertTransform(data: torch.Tensor, 
@@ -103,25 +104,58 @@ def HilbertTransform(data: torch.Tensor,
     return torch.cat([data, out], dim=-2)
 
 
-def inv_Fourier_Transform(signal: torch.Tensor, 
-                          normalize: bool=False) -> torch.Tensor:#, 
-    assert(signal.ndim>=3)
-    signal = signal.transpose(-1,-2)
-    assert(signal.shape[-1]==2)
-    signal = torch.view_as_complex(signal.contiguous())
-    signal = torch.view_as_real(ifft(ifftshift(signal, dim=-1),dim=-1)).transpose(-1,-2)
-    return signal.contiguous()
+# def inv_Fourier_Transform(signal: torch.Tensor, 
+#                           normalize: bool=False) -> torch.Tensor:#, 
+#     assert(signal.ndim>=3)
+#     signal = signal.transpose(-1,-2)
+#     assert(signal.shape[-1]==2)
+#     signal = torch.view_as_complex(signal.contiguous())
+#     signal = torch.view_as_real(ifft(ifftshift(signal, dim=-1),dim=-1)).transpose(-1,-2)
+#     return signal.contiguous()
 
+def batch_smooth(x: torch.Tensor,
+                 window_len: torch.Tensor,
+                 window: str='flat',
+                ) -> torch.Tensor:
+    assert(x.ndim==3)
+    x = x.permute(1,0,2)
+    if isinstance(window_len, float): 
+        window_len = torch.as_tensor(window_len)
+        for _ in range(x.ndim - window_len.ndim): 
+            window_len = window_len.unsqueeze(0)
+        window_len = window_len.repeat(x.shape[1], 1, 1)
+    # print('window_len: ',window_len)
+    w_len = (x.shape[-1] * window_len).int()#.repeat(x.shape[0], 1, 1)
+    # print('w_len.shape: ',w_len.shape)
+    mx, threshold = w_len.max().item(), torch.div(w_len.squeeze(), 2, rounding_mode='floor')
+    even = mx if mx % 2 == 0 else mx + 1
+    w = torch.zeros((1, mx), dtype=torch.float32).repeat(x.shape[1], 1)
+    # print(w.shape)
+    for i in range(even//2):
+        ind = (i<threshold)
+        # print('ind: ',ind)
+        w[ind, i] = 1
+    w = w.roll(even//2, -1)
+    w = w + w.flip(-1)
+    w[(w==2)] = 1
+    # print(w.shape)
+    w /= w.sum(dim=-1, keepdims=True)
+    w = w.unsqueeze(1)
+    out = F.conv1d(input=F.pad(x, (even, even), mode='reflect'), weight=w, groups=w.shape[0]).permute(1,0,2)
+    start, stop = even//2, -even//2-1 if even==mx else -even//2-2
+    out = out[...,start:stop]
+    return out
 
 def smooth(x: torch.Tensor,
-           window_len: float: 0.1,
+           window_len: float=0.1,
            window: str='flat') -> torch.Tensor:
     assert(x.ndim==3)
     w_len = int(x.shape[-1] * window_len)
     w = torch.ones((1, 1, w_len), dtype=torch.float32)
     w /= w.sum()
     out = F.conv1d(input=F.pad(x, (w_len, w_len), mode='reflect'), weight=w)
-    out = out[...,w_len//2:-w_len//2]
+    out = out[...,w_len//2:-w_len//2-1]
+    print(x.shape, out.shape)
     assert(x.shape==out.shape)
     return out
 
@@ -139,4 +173,3 @@ def torch_batch_linspace(start: torch.Tensor,
     out += start
     out[...,-1] = stop[...,-1]
     return out
-

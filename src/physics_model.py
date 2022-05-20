@@ -1,15 +1,14 @@
+import copy
 import os
+from collections import OrderedDict
+from functools import reduce
+
+import numpy as np
 import scipy.io as io
 import torch
 import torch.nn as nn
-import numpy as np
-import copy
-from functools import reduce
-from collections import OrderedDict
-
-from src.interpolate import CubicHermiteMAkima as CubicHermiteInterp#, batch_linspace 
-from src.physics_model.aux import *
-
+from src.aux import *
+from src.interpolate import CubicHermiteMAkima as CubicHermiteInterp  # , batch_linspace
 
 __all__ = ['PhysicsModel'] #
 
@@ -45,7 +44,6 @@ class PhysicsModel(nn.Module):
             apodization:  amount of apodization in Hz. Should only be included if 
                           noise=True in the forward pass
         '''
-        self.first_time = True
         # Load basis spectra, concentration ranges, and units
         paths = ['./dataset/basis_spectra/' + opt.PM_basis_set] # 'fitting_basis_ge_PRESS144.mat'
 
@@ -334,6 +332,11 @@ class PhysicsModel(nn.Module):
         for _ in range(spectra.ndim - mult.ndim): mult = mult.unsqueeze(0)
         for _ in range(spectra.ndim - phi1.ndim): phi1 = phi1.unsqueeze(-1)
         return complex_exp(spectra, phi1.deg2rad() * mult)
+        '''
+        carrier_freq = 127.8 # MHz
+        freq_ref = 4.68 * carrier_freq / 10e6
+        degree = 2*pi*bandwidth*(1/(bandwidth + freq_ref))
+        '''
         
     def frequency_shift(self, 
                         fid: torch.Tensor, 
@@ -350,7 +353,7 @@ class PhysicsModel(nn.Module):
         f_shift = param.mul(t.mT)#.mul(-1.0).mul(t.mT)
         
         # # Convert back to time-domain
-         fid = inv_Fourier_Transform(fid)
+        fid = inv_Fourier_Transform(fid)
         # # Apply TD complex exponential
         fid = complex_exp(fid, f_shift)# -1*f_shift)
         # # Return to the frequency domain
