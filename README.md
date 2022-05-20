@@ -3,6 +3,7 @@ Notebook and Physics model to generate in vivo MRSI data to be used for deep lea
 
 # What makes this model special?
 There are several notable differences from standard models. 
+
     1. All the steps in this model are in the opposite order of spectral fitting and processing. Therefore, all the corresponding parameters are the actual correction values you would need to fit the spectra with a standard pipeline.
     2. The generator is specifically geared towards facilitating deep learning projects. While all of the model parameters are realistic values (physiological or pathological), the various combinations may be non-sensical from a spectroscopy point of view. However, DL models train better with uniform representations in the training data. Class balanace is thereby ensured by using uniform distributions when sampling the parameters.
     3. All (non-creatine) parameters have a 20% chance of being omitted. This helps DL models better learn the parameter representations by showing what a sample looks like when the parameter is missing.
