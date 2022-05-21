@@ -21,3 +21,7 @@ There are several notable differences from standard models.
        Therefore, different frequency shifts are applied to the two groups. 
     6. A variety of quantification methods are built-in. Modulated basisline area integration, basisline peak heights, and  
        ratios wrt Cr are produced automatically.
+
+# Working with the model
+If you use one of the provided configuration templates, please cite the corresponding paper listed at the end of the json file. If you would like to collaborate to create a dataset, please reach out at john.t.lamaster (at) gmail dot com.
+
