@@ -267,16 +267,20 @@ class PhysicsModel(nn.Module):
     def add_artifacts(self,
                       baselines: torch.Tensor,
                       params: torch.Tensor=None,
+                      dims=3, # what type is torch.Tensor.ndim
                      ) -> torch.Tensor:
         '''Spectra are normalized to [-1,1], therefore, the splines need to be able to cover that distance'''
-        return self.frequency_shift(self.dephase(HilbertTransform(baselines, dim=-1), # shape: [batchSize, num_splines, spectrum_length]
-                                                 phi=params[:,(self.index['phi0'],self.index['phi1'])],
-                                                 ppm=self.ppm_cropped,
-                                                 quantify=quantify,
-                                                 baseline=True),
-                                    param=params[:,self.index['f_shift']],
-                                    quantify=quantify,
-                                    t=self.cropped_t)
+        out = self.frequency_shift(self.dephase(HilbertTransform(baselines, dim=-1), # shape: [batchSize, num_splines, spectrum_length]
+                                                phi=params[:,(self.index['phi0'],self.index['phi1'])],
+                                                ppm=self.ppm_cropped,
+                                                quantify=quantify,
+                                                baseline=True),
+                                   param=params[:,self.index['f_shift']],
+                                   quantify=quantify,
+                                   t=self.cropped_t)
+        if dims==4: 
+            return out.unsqueeze(1)
+        return out
     
     
     def B0_inhomogeneities(self, 
@@ -700,7 +704,8 @@ class PhysicsModel(nn.Module):
         if isinstance(baseline, torch.Tensor):
             if gen: print('>>>>> Adding baselines')
             baseline = self.add_artifacts(baselines=baseline,
-                                          params=params)
+                                          params=params,
+                                          dims=specSummed.ndim)
             ppm = self.cropped_ppm #if not splines else self.ppm_cropped
             specSummed += self._resample_(baseline, ppm=ppm, length=self.length, scale=params[:,self.index['scale']])
             # specSummed += torch.cat([self.resample_(baseline[...,0,:].unsqueeze(-2), ppm=ppm, length=self.length, scale=params[:,self.index['scale']]),
