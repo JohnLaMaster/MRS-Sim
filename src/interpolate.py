@@ -51,8 +51,7 @@ class CubicHermite(nn.Module):
         size[-1] = -1
            
         xs = xs.expand(size).contiguous()
-        I  = torch.searchsorted(self.x[...,0,1:-1].unsqueeze(-2).contiguous(), 
-                                xs[...,0,:].unsqueeze(-2).contiguous()).repeat(size0)
+        I  = torch.searchsorted(self.x[...,1:-1].contiguous(), xs.contiguous()).repeat(size0)
 
         x  = torch.gather(self.x, -1, I)
         dx = torch.gather(self.x, -1, I+1) - x
