@@ -1,0 +1,3 @@
+[submodule "torch.nn.CubicHermiteInterpolation"]
+	path = src.interpolate
+	url = https://github.com/JohnLaMaster/torch.nn.CubicHermiteInterpolation
