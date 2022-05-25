@@ -1,7 +1,12 @@
+import math
+import os
+
 import numpy as np
+import scipy.io as io
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from types import SimpleNamespace
 
 
 # from torch.fft import fft, fftshift, ifft, ifftshift, irfft, rfft
@@ -62,6 +67,33 @@ def convertdict(file, simple=False, device='cpu'):
             for k in delete:
                 file.pop(k, None)
         return file
+
+
+class counter():
+    def __init__(self, start=0):
+        super().__init__()
+        self.start = copy.copy(start)
+        self._count = start
+
+    def __call__(self, num: int=1):
+        self._count += num
+        return self._count
+
+    def __repr__(self):
+        return str(self._count)
+
+    def __enter__(self):
+        # self._count += 1
+        return int(self._count)
+
+    def reset(self):
+        self._count = copy.copy(self.start)
+
+
+def rand_omit(data: torch.Tensor, value: float=0., p: float=0.2)
+    assert(data.ndim>=2)
+    sign = torch.tensor([True if torch.rand([1]) > (1.0 - 0.2) else False for _ in range(data.shape[0])])
+    return data[sign,...].fill_(value)
 
 
 # def Fourier_Transform(signal: torch.Tensor) -> torch.Tensor: 
@@ -173,3 +205,78 @@ def torch_batch_linspace(start: torch.Tensor,
     out += start
     out[...,-1] = stop[...,-1]
     return out
+
+def _save(path: str, 
+          spectra: torch.Tensor, 
+          parameters: dict, 
+          ppm_range: torch.Tensor, 
+          baselines: torch.Tensor=None, 
+          residual_water: torch.Tensor=None, 
+          spectral_fit: torch.Tensor=None, 
+          quantities: dict=None):
+    print('>>> Saving Spectra')
+    base, _ = os.path.split(path)
+    os.makedirs(base, exist_ok=True)
+    num_test = 0
+    dict = {'spectra': spectra.numpy(),
+            'params': parameters,
+            'ppm_range': ppm_range,
+            'baselines': bl.numpy(),
+            'residual_water': blf.numpy(),
+            'spectral_fit': None,
+            'quantities': quantities,
+            }
+    io.savemat(path + '_spectra.mat', do_compression=True, mdict=dict)
+    print(path + '_spectra.mat')
+
+# Source: https://stackoverflow.com/questions/52859751/most-efficient-way-to-find-order-of-magnitude-of-float-in-python
+def OrderOfMagnitude(data: torch.Tensor):
+    ind = data.abs().max(-1, keepdims=True).index
+    return torch.floor(torch.log10(data[ind]))
+
+
+def sample_resWater(**cfg):
+                    # N: int, 
+                    # upper: list=[0,1], 
+                    # lower: list=[0,1], 
+                    # window: float=0.05,
+                    # length: int=2048,
+                    # cR_water: list=[3.7, 5.4],
+                    # cR: list=[0.2, 4.2],
+                    # prime: float=0.15,
+                    # drop_prob: float=0.2)
+    return {
+        'start': torch.zeros(cfg['N'],1,1),
+        'end': torch.zeros(cfg['N'],1,1),
+        'std': torch.zeros(cfg['N'],1,1),
+        'upper_bnd': torch.ones(cfg['N'],1,1).uniform_(cfg['upper'][0],cfg['upper'][1]),
+        'lower_bnd': torch.ones(cfg['N'],1,1).uniform_(cfg['lower'][0],cfg['lower'][1]) * -1,
+        'windows': torch.zeros(cfg['N'],1,1).fill_(cfg['window']),
+        'length': cfg['length'],
+        'cropRange_resWater': cfg['cR_water'],
+        'cropRange': cfg['cR'],
+        'start_prime': rand_omit(torch.zeros(cfg['N'],1,1).uniform(0,cfg['prime']), 0.0, cfg['drop_prob']),
+        'end_prime': rand_omit(torch.zeros(cfg['N'],1,1).uniform(0,cfg['prime']), 0.0, cfg['drop_prob']),
+        'rand_omit': cfg['drop_prob'],
+    }
+
+
+def sample_baselines(**cfg): 
+                     # N: int, 
+                     # upper: float=1, 
+                     # lower: float=-1, 
+                     # window: list=[0.1,0.3],
+                     # length: int=512,
+                     # cR: list=[0.2, 4.2],
+                     # drop_prob: float=0.2)
+    return {
+        'start': torch.zeros(cfg['N'],1,1),
+        'end': torch.zeros(cfg['N'],1,1),
+        'std': torch.zeros(cfg['N'],1,1),
+        'upper_bnd': cfg['upper'],
+        'lower_bnd': cfg['lower'],
+        'windows': torch.ones_like(cfg['N'],1,1).uniform_(cfg['window'][0],cfg['window'][1]),
+        'length': cfg['length'],
+        'cropRange': cfg['cR'],
+        'rand_omit': cfg['drop_prob'],
+    }
