@@ -1,18 +1,20 @@
+import copy
 import math
 import os
+from collections import OrderedDict
 
 import numpy as np
 import scipy.io as io
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.fft import fft, fftshift, ifft, ifftshift, irfft, rfft
 from types import SimpleNamespace
 
-
-# from torch.fft import fft, fftshift, ifft, ifftshift, irfft, rfft
-
-# __all__ = ['complex_exp', 'convertdict', 'Fourier_Transform', 'HilbertTransform', 
-#            'inv_Fourier_Transform', 'smooth', 'torch_batch_linspace', ]
+__all__ = ['complex_exp', 'convertdict', 'Fourier_Transform', 'HilbertTransform', 
+           'inv_Fourier_Transform', 'batch_smooth', 'torch_batch_linspace', 'counter',
+           'rand_omit','OrderOfMagnitude','sample_resWater','sample_baselines',
+           'torch2numpy','sort_parameters','concat_dict']
 
 
 def complex_exp(signal: torch.Tensor, 
@@ -33,7 +35,9 @@ def complex_exp(signal: torch.Tensor,
     real = signal[...,0,:].mul(torch.cos(theta[...,1,:])) - signal[...,1,:].mul(torch.sin(theta[...,1,:]))
     imag = signal[...,0,:].mul(torch.sin(theta[...,1,:])) + signal[...,1,:].mul(torch.cos(theta[...,1,:]))
 
-    return torch.cat([real.unsqueeze(1), imag.unsqueeze(1)], dim=-2)
+    # print('real.shape {}, imag.shape {}'.format(real.shape,imag.shape))
+
+    return torch.cat([real.unsqueeze(-2), imag.unsqueeze(-2)], dim=-2)
 
 
 def convertdict(file, simple=False, device='cpu'):
@@ -58,6 +62,7 @@ def convertdict(file, simple=False, device='cpu'):
                     delete.append(k)
                 else:
                     try:
+                        # print(k)
                         file[k] = torch.FloatTensor(np.asarray(file[k], dtype=np.float32)).squeeze().to(device)
                     except TypeError:
                         pass
@@ -90,19 +95,20 @@ class counter():
         self._count = copy.copy(self.start)
 
 
-def rand_omit(data: torch.Tensor, value: float=0., p: float=0.2)
+def rand_omit(data: torch.Tensor, value: float=0., p: float=0.2):
     assert(data.ndim>=2)
-    sign = torch.tensor([True if torch.rand([1]) > (1.0 - 0.2) else False for _ in range(data.shape[0])])
-    return data[sign,...].fill_(value)
+    sign = torch.tensor([True if torch.rand([1]) > (1.0 - p) else False for _ in range(data.shape[0])])
+    data[sign,...] = value
+    return data, sign
 
 
-# def Fourier_Transform(signal: torch.Tensor) -> torch.Tensor: 
-#     assert(signal.ndim>=3)
-#     signal = signal.transpose(-1,-2)
-#     assert(signal.shape[-1]==2)
-#     signal = torch.view_as_complex(signal.contiguous())
-#     signal = torch.view_as_real(fftshift(fft(signal, dim=-1), dim=-1)).transpose(-1,-2)
-#     return signal.contiguous()
+def Fourier_Transform(signal: torch.Tensor) -> torch.Tensor: 
+    assert(signal.ndim>=3)
+    signal = signal.transpose(-1,-2)
+    assert(signal.shape[-1]==2)
+    signal = torch.view_as_complex(signal.contiguous())
+    signal = torch.view_as_real(fftshift(fft(signal, dim=-1), dim=-1)).transpose(-1,-2)
+    return signal.contiguous()
 
 
 def HilbertTransform(data: torch.Tensor, 
@@ -136,18 +142,21 @@ def HilbertTransform(data: torch.Tensor,
     return torch.cat([data, out], dim=-2)
 
 
-# def inv_Fourier_Transform(signal: torch.Tensor, 
-#                           normalize: bool=False) -> torch.Tensor:#, 
-#     assert(signal.ndim>=3)
-#     signal = signal.transpose(-1,-2)
-#     assert(signal.shape[-1]==2)
-#     signal = torch.view_as_complex(signal.contiguous())
-#     signal = torch.view_as_real(ifft(ifftshift(signal, dim=-1),dim=-1)).transpose(-1,-2)
-#     return signal.contiguous()
+def inv_Fourier_Transform(signal: torch.Tensor, 
+                          normalize: bool=False) -> torch.Tensor:#, 
+    assert(signal.ndim>=3)
+    signal = signal.transpose(-1,-2)
+    print('signal.shape: ',signal.shape)
+    assert(signal.shape[-1]==2)
+    signal = torch.view_as_complex(signal.contiguous())
+    signal = torch.view_as_real(ifft(ifftshift(signal, dim=-1),dim=-1)).transpose(-1,-2)
+    return signal.contiguous()
+
 
 def batch_smooth(x: torch.Tensor,
                  window_len: torch.Tensor,
                  window: str='flat',
+                 mode: str='reflect'
                 ) -> torch.Tensor:
     assert(x.ndim==3)
     x = x.permute(1,0,2)
@@ -173,7 +182,7 @@ def batch_smooth(x: torch.Tensor,
     # print(w.shape)
     w /= w.sum(dim=-1, keepdims=True)
     w = w.unsqueeze(1)
-    out = F.conv1d(input=F.pad(x, (even, even), mode='reflect'), weight=w, groups=w.shape[0]).permute(1,0,2)
+    out = F.conv1d(input=F.pad(x, (even, even), mode=mode), weight=w, groups=w.shape[0]).permute(1,0,2)
     start, stop = even//2, -even//2-1 if even==mx else -even//2-2
     out = out[...,start:stop]
     return out
@@ -231,11 +240,13 @@ def _save(path: str,
 
 # Source: https://stackoverflow.com/questions/52859751/most-efficient-way-to-find-order-of-magnitude-of-float-in-python
 def OrderOfMagnitude(data: torch.Tensor):
-    ind = data.abs().max(-1, keepdims=True).index
-    return torch.floor(torch.log10(data[ind]))
+    for d in range(data.ndim-1,0,-1):
+        data = data.amax(d, keepdims=True)
+    # print('OrderOfMagnitude data.shape ',data.shape)
+    return torch.floor(torch.log10(data))
 
 
-def sample_resWater(**cfg):
+def sample_resWater(N: int, **cfg):
                     # N: int, 
                     # upper: list=[0,1], 
                     # lower: list=[0,1], 
@@ -245,23 +256,28 @@ def sample_resWater(**cfg):
                     # cR: list=[0.2, 4.2],
                     # prime: float=0.15,
                     # drop_prob: float=0.2)
-    return {
-        'start': torch.zeros(cfg['N'],1,1),
-        'end': torch.zeros(cfg['N'],1,1),
-        'std': torch.zeros(cfg['N'],1,1),
-        'upper_bnd': torch.ones(cfg['N'],1,1).uniform_(cfg['upper'][0],cfg['upper'][1]),
-        'lower_bnd': torch.ones(cfg['N'],1,1).uniform_(cfg['lower'][0],cfg['lower'][1]) * -1,
-        'windows': torch.zeros(cfg['N'],1,1).fill_(cfg['window']),
-        'length': cfg['length'],
-        'cropRange_resWater': cfg['cR_water'],
-        'cropRange': cfg['cR'],
-        'start_prime': rand_omit(torch.zeros(cfg['N'],1,1).uniform(0,cfg['prime']), 0.0, cfg['drop_prob']),
-        'end_prime': rand_omit(torch.zeros(cfg['N'],1,1).uniform(0,cfg['prime']), 0.0, cfg['drop_prob']),
-        'rand_omit': cfg['drop_prob'],
-    }
+    if not isinstance(cfg, type(None)):
+        start, _ = rand_omit(torch.zeros(N,1,1).uniform_(0,cfg['prime']), 0.0, cfg['drop_prob'])
+        end, _   = rand_omit(torch.zeros(N,1,1).uniform_(0,cfg['prime']), 0.0, cfg['drop_prob'])
+        return {
+            'start': torch.zeros(N,1,1),
+            'end': torch.zeros(N,1,1),
+            'std': torch.zeros(N,1,1).uniform_(cfg['std'][0],cfg['std'][1]),
+            'upper_bnd': torch.ones(N,1,1).uniform_(cfg['upper'][0],cfg['upper'][1]),
+            'lower_bnd': torch.ones(N,1,1).uniform_(cfg['lower'][0],cfg['lower'][1]) * -1,
+            'windows': torch.zeros(N,1,1).fill_(cfg['window']),
+            'length': cfg['length'],
+            'cropRange_resWater': cfg['cR_water'],
+            'cropRange': cfg['cR'],
+            'start_prime': start,
+            'end_prime': end,
+            'scale': cfg['scale'],
+            'rand_omit': cfg['drop_prob'],
+        }
+    return None
 
 
-def sample_baselines(**cfg): 
+def sample_baselines(N: int, **cfg): 
                      # N: int, 
                      # upper: float=1, 
                      # lower: float=-1, 
@@ -269,14 +285,44 @@ def sample_baselines(**cfg):
                      # length: int=512,
                      # cR: list=[0.2, 4.2],
                      # drop_prob: float=0.2)
-    return {
-        'start': torch.zeros(cfg['N'],1,1),
-        'end': torch.zeros(cfg['N'],1,1),
-        'std': torch.zeros(cfg['N'],1,1),
-        'upper_bnd': cfg['upper'],
-        'lower_bnd': cfg['lower'],
-        'windows': torch.ones_like(cfg['N'],1,1).uniform_(cfg['window'][0],cfg['window'][1]),
-        'length': cfg['length'],
-        'cropRange': cfg['cR'],
-        'rand_omit': cfg['drop_prob'],
-    }
+    if not isinstance(cfg, type(None)):
+        return {
+            'start': torch.zeros(N,1,1).uniform_(cfg['start'][0],cfg['start'][1]),
+            'end': torch.zeros(N,1,1).uniform_(cfg['end'][0],cfg['end'][1]),
+            'std': torch.zeros(N,1,1).uniform_(cfg['std'][0],cfg['std'][1]),
+            'upper_bnd': cfg['upper'],
+            'lower_bnd': cfg['lower'],
+            'windows': torch.ones(N,1,1).uniform_(cfg['window'][0],cfg['window'][1]),
+            'length': cfg['length'],
+            'cropRange': cfg['cR'],
+            'scale': cfg['scale'],
+            'rand_omit': cfg['drop_prob'],
+        }
+    return None
+
+def torch2numpy(input: dict):
+    if isinstance(input, dict):
+        for k, v in input.items():
+            if isinstance(input[k], dict):
+                torch2numpy(input[k])
+            elif torch.is_tensor(v):
+                input[k] = v.numpy()
+            else:
+                pass
+    return input
+
+def sort_parameters(params: torch.Tensor,
+                    index: dict):
+    parameters = OrderedDict()
+    # keys = list(index.keys())
+    for i, k in enumerate(index.keys()):
+        if not k in ['metabolites', 'parameters', 'overall']:
+            parameters.update({k: params[:,index[k]]})
+    return parameters
+
+def concat_dict(target: dict,
+                new: dict):
+    assert([(key in target.keys().lower()) for key in new.keys().lower()])
+    for k, v in new.items():
+        target[k] = np.concatenate([target[k], v], axis=0)
+    return target
