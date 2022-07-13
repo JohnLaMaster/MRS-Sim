@@ -504,7 +504,7 @@ class PhysicsModel(nn.Module):
         lin_snr = 10**(param / 10) # convert from decibels to linear scale
         print('lin_snr: ',lin_snr.squeeze())
         if not isinstance(transients, type(None)): 
-            lin_snr = lin_snr * torch.sqrt(transients)
+            lin_snr = lin_snr / torch.sqrt(transients)
         k = 1 / lin_snr # scaling coefficient
         print('k: ',k.squeeze())
         a_signal = torch.FloatTensor([2]).sqrt().pow(-1).to(fid.device) 
