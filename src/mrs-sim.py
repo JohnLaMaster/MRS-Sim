@@ -148,7 +148,9 @@ def simulate(config_file, args=None):
 
     # Frequency Shift
     print('>>> Frequency Shift')
+    base_shift = torch.ones([totalEntries, 1]).uniform_(0.1,0.9+1e-8)
     for i, n in enumerate(ind['f_shift']):
+#         if len(in
         # MM/Lip fshift value must be larger (and +) than water shift
         if len(ind['f_shift'])==2 and i==1:
             params[:,n] = params[:,n] / 6 + 0.5 # Only uses [0, 1/2*max_range]
