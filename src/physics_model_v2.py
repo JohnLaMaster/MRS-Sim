@@ -69,8 +69,6 @@ class PhysicsModel(nn.Module):
                         if not isinstance(v, str): 
                             self.register_buffer(str(k), v.float())
 
-
-        
     def __repr__(self):
         lines = sum([len(listElem) for listElem in self.totals])   
         out = 'MRS_PhysicsModel(basis={}, lines={}'.format('Osprey, GE_PRESS144', lines)
@@ -119,6 +117,7 @@ class PhysicsModel(nn.Module):
                    basisFcn_len: float=1024,
                    ppm_ref: float=4.65,
                    transients: int=8,
+                   coil_sens: bool=False,
                    spectral_resolution: list=[10.0, 10.0, 10.0],
                    image_resolution: list=[0.5, 0.5, 0.5],
                    lineshape: str='voigt',
@@ -184,11 +183,14 @@ class PhysicsModel(nn.Module):
         num_bF = l+self.MM if self.MM else l
         header, cnt = self._metab, counter(start=int(3*num_bF)-1)
         g = 1 if not self.MM else 2
-        names = ['d',   'dmm', 'g',   'gmm', 'fshift', 'snr', 'phi0', 'phi1', 'b0', 'bO_dir']
-        mult  = [  l, self.MM,   l, self.MM,        g,     1,      1,      1,    1,        3] # Should as a global fshift, metabolites, and MM fsfhitfs
+        names = ['d',   'dmm', 'g',   'gmm', 'fshift', 'fshiftmet', 'fshiftmm', 'snr', 'phi0', 'phi1', 'b0', 'bO_dir']
+        mult  = [  l, self.MM,   l, self.MM,        1,           l,    self.MM,     1,      1,      1,    1,        3] # Should as a global fshift, metabolites, and MM fsfhitfs
         if transients>1:
-            names.append('coil_sens')
+            names.append('transients')
             mult.append(transients)
+            if coil_sens:
+                names.append('coil_sens')
+                mult.append(transients)
         for n, m in zip(names, mult): 
             for _ in range(m): header.append(n)
             
@@ -196,12 +198,15 @@ class PhysicsModel(nn.Module):
         self.min_ranges = torch.zeros([1,len(header)], dtype=torch.float32)
         self.max_ranges = torch.zeros_like(self.min_ranges)
         for i, m in enumerate(header):
-            met, temp = False, None
+            met, temp, strt = False, None, None
             if m in self.basisFcns['metabolites'].keys(): 
                 temp = self.basisFcns['metabolites'][m]
                 met = True
             elif m in self.basisFcns['artifacts'].keys(): 
                 temp = self.basisFcns['artifacts'][m]
+            elif m=='fshiftmet':
+                if not strt: strt = i 
+                temp = self.basisFcns['metabolites'][i]['fshift']
             if temp:
                 self.min_ranges[0,i] = temp['min']
                 self.max_ranges[0,i] = temp['max']
@@ -218,7 +223,8 @@ class PhysicsModel(nn.Module):
         ind.append(tuple(int(x) for x in torch.arange(0,num_bF) + 2*num_bF)) # Single Gaussian correction factor
 
         # Frequency Shift / Scaling Factor / Noise depending on supervised T/F
-        ind.append(tuple(cnt(1) for _ in range(g))) # Fshift
+        ind.append(cnt(1)) # Global fshift
+        ind.append(tuple(cnt(1) for _ in range(num_bF))) # Individual fshifts
         # ind.append(cnt(1)) # Scaling
         ind.append(cnt(1)) # SNR
         if transients
@@ -234,6 +240,8 @@ class PhysicsModel(nn.Module):
         # # Coil sensitivities
         if transients>1:
             ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,transients)))
+            if coil_sens:
+                ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,transients)))
 
         # Cummulative
         total = cnt(1)
@@ -242,9 +250,12 @@ class PhysicsModel(nn.Module):
         ind.append(tuple(int(x) for x in torch.arange(num_bF,total)))    # Parameters
         ind.append(tuple(int(x) for x in torch.arange(0,total)))         # Overall
 
-        dct.update({'D': torch.empty(1), 'G': torch.empty(1), 'F_Shift': torch.empty(1), 'SNR': torch.empty(1), 
-                    'Phi0': torch.empty(1), 'Phi1': torch.empty(1), 'B0': torch.empty(1), 'B0_dir': torch.empty(1)})
-        if transients: dct.update({'Coil_Sens': torch.empty(1)})
+        dct.update({'D': torch.empty(1), 'G': torch.empty(1), 'F_Shift': torch.empty(1), 'F_Shifts': torch.empty(1), 
+                    'SNR': torch.empty(1), 'Phi0': torch.empty(1), 'Phi1': torch.empty(1), 'B0': torch.empty(1), 
+                    'B0_dir': torch.empty(1)})
+        if transients: 
+            dct.update({'Transients': torch.empty(1)})
+            if coil_sens: dct.update({'Coil_Sens': torch.empty(1)})
         dct.update({'Metabolites': torch.empty(1), 'Parameters': torch.empty(1), 'Overall': torch.empty(1)})
         self._index = OrderedDict({d.lower(): i for d,i in zip(dct.keys(),ind)})
 
@@ -783,8 +794,8 @@ class PhysicsModel(nn.Module):
             fidSum = fid[:,0:l,:,:].sum(dim=-3)
             spectral_fit = fidSum.clone()
             mx_values = torch.amax(fidSum[...,0,:].unsqueeze(-2), dim=-1, keepdims=True) 
-            mm = inv_Fourier_Transform(torch.flip(Fourier_Transform(mm), dims=[-1]))
-            fidSum = fidSum + self.frequency_shift(mm, params[:,self.index['f_shift'][self.MM:]])
+            # mm = inv_Fourier_Transform(torch.flip(Fourier_Transform(mm), dims=[-1]))
+            fidSum += mm #self.frequency_shift(mm, params[:,self.index['f_shifts'][self.MM:]])
         return fidSum, spectral_fit, mx_values
 
             
@@ -839,12 +850,14 @@ class PhysicsModel(nn.Module):
                 phi0: bool=True,
                 phi1: bool=True,
                 noise: bool=True,
-                fshift: bool=True,
                 apodize: bool=False,
                 offsets: bool=True,
+                fshift_g: bool=True,
+                fshift_i: bool=True,
                 resample: bool=True,
                 snr_both: bool=False,
                 baselines: dict=None, 
+                coil_sens: bool=False,
                 magnitude: bool=True,
                 zero_fill: int=False,
                 broadening: bool=True,
@@ -881,8 +894,14 @@ class PhysicsModel(nn.Module):
         if broadening:
             if gen: print('>>>>> Applying line shape distortions')
             fid = self.lineshape_correction(fid, params[:,self.index['d']], 
-                                                 params[:,self.index['g']])
-                
+                                                 params[:,self.index['g']])    
+        
+        # Frequency Shift
+        if fshift_i:
+            if gen: print('>>>>> Shifting individual frequencies')
+            fidSum = self.frequency_shift(fid=fid, 
+                                          param=params[:,self.index['f_shifts']])
+            
         # Summing the basis lines
         l = len(self._metab) - self.MM if self.MM else len(self._metab)
         fidSum, spectral_fit, mx_values = self.line_summing(fid=fid, 
@@ -935,11 +954,10 @@ class PhysicsModel(nn.Module):
                                           phi1=params[:,self.index['phi1']])
         
         # Frequency Shift
-        if fshift:
-            if gen: print('>>>>> Shifting frequencies')
-            end = self.MM if self.MM else len(self.index['f_shift'])
+        if fshift_g:
+            if gen: print('>>>>> Shifting global frequencies')
             fidSum = self.frequency_shift(fid=fidSum, 
-                                          param=params[:,self.index['f_shift'][0:end]])
+                                          param=params[:,self.index['f_shift']])
 
         # Eddy Currents
         if eddy:
