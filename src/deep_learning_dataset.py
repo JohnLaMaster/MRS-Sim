@@ -1,5 +1,4 @@
 import argparse
-import copy
 import json
 import os
 import sys
@@ -7,7 +6,7 @@ import sys
 import numpy as np
 import scipy.io as io
 import torch
-from aux import *
+from aux import concat_dict, sort_parameters, torch2numpy
 from pm_v2 import PhysicsModel
 from types import SimpleNamespace
 
@@ -15,6 +14,7 @@ sys.path.append('../')
 
 
 def simulate(config_file, args=None):
+    # Load the config file
     with open(config_file) as file:
         config = json.load(file)
 
@@ -23,11 +23,11 @@ def simulate(config_file, args=None):
     resWater_cfg = config["resWater_cfg"] if "resWater_cfg" in confg_kys else None
     baseline_cfg = config["baseline_cfg"] if "baseline_cfg" in confg_kys else None
 
-
     config = SimpleNamespace(**config)
     p = 1 - config.drop_prob #0.8 # probability of including a variable for a given data sample
     totalEntries = config.totalEntries
 
+    # Define and initialize the physics model
     pm = PhysicsModel(PM_basis_set=config.PM_basis_set)
     pm.initialize(metab=config.metabolites, 
                   cropRange=config.cropRange,
@@ -58,14 +58,14 @@ def simulate(config_file, args=None):
     # Sample parameters
     params = torch.zeros((totalEntries, ind['overall'][-1]+1)).uniform_(0,1+1e-6)
     params = params.clamp(0,1)
+    # Adding eps and then clamping converts the range from [0,1) to [0,1].
 
     # Quantify parameters
     params = pm.quantify_params(params)
     
-    # Randomly drop some metabolites
-    for n in ind['metabolites']:
-        sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
-        params[sign,n].fill_(0.)
+    '''
+    This next section of code will need to be customized for your own implementations.
+    '''
 
     # All metabolite values are ratios wrt creatine. Therefore, Cr is always 1.0
     params[:,ind['cr']].fill_(1.0)
@@ -73,6 +73,8 @@ def simulate(config_file, args=None):
     '''
     If you want to use a covariance matrix for sampling metabolite amplitudes, this is where covmat and loc 
     should be defined. 
+    Use the ind variable to move the sampled parameters to the correct indices. The exact implementation will
+    depend on the variables and order of variables that are included in your covariance matrix.
     '''
     # if config.use_covmat:
     #     # _, mtb_ind = pm.basis_metab
@@ -94,68 +96,92 @@ def simulate(config_file, args=None):
     #     params[:,start:stop+1] = torch.cat(temp[...,0], torch.ones_like(temp[...,0]), temp[...,-1], dim=-1)
     # print(params.shape)
 
+    '''
+    The next section of code is used to drop some parameters from each spectrum for deep learning applications.
+    Should you want to use different distributions for some of the parameters, the following can be used as a 
+    guide. Defining different distributions can be done before OR after quantifying the parameters.
+    '''
+    
     print('>>> Line Broadening')
     keys, g = ind.keys(), 0
     for k in keys: g += 1 if 'mm' in k else 0
     for k in keys: g += 1 if 'lip' in k else 0
 
     # Drop D from some metabolites
-    for n in ind['d']:
-        sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
-        params[sign,n].fill_(0.)
+    if config.lineshape in ['voigt','lorentzian']:
+        for n in ind['d']:
+            sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
+            params[sign,n].fill_(0.)
+    else:
+        for n in ind['d']: params[:,n].fill_(0.0)
         
-    # Drop G from some spectra
-    sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
-    for n in ind['g']:
-        params[sign,n].fill_(0.)  
-        
+    # Drop G from some spectra by group
+    if config.lineshape in ['voigt','gaussian']:
+        groups = [0]
+        if g!=0: groups.append(int(l-g-1))
+        for n in groups:
+            sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
+            params[sign,n].fill_(0.)
+    else:
+        for n in ind['g']: params[:,n].fill_(0.0)
 
-    # One Gaussian value is used for metabolites and the other is used for MM/Lip - but only 2 values!  
+    # One Gaussian value is used for metabolites and the other is used for MM/Lip - but only 2 values!
+    # Should an additional group be separated, this and the pm.initialize() code will need to be updated.
     for n in ind['g']:
-        if n>0 and n<l-g:
+        if n>0 and n<l-g-1:
             params[:,n] = params[:,ind['g'][0]].clone()
-        if n>l-g:
-            params[:,n] = params[:,ind['g'][int(l-g)]].clone()
+        if n>l-g-1:
+            params[:,n] = params[:,ind['g'][int(l-g-1)]].clone()
 
-
-    # Zero out metabolites and their line broadening
-    for n in range(l):
+    
+    # Randomly drop some metabolites and their line broadening and fshifts
+    for _, n in enumerate(ind['metabolites']):
         if not n==ind['cr']: # Creatine
             sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
-            params[sign,int(n)].fill_(0.)
+            params[sign,int(n)].fill_(0.) # amplitude
             params[sign,int(n+l)].fill_(0.) # If the lines are omitted, then the broadening is too
-            params[sign,int(n+2*l)].fill_(0.)
+            params[sign,int(n+2*l)].fill_(0.) # gaussian
+            params[sign,int(n+3*l+1)].fill_(0.) # fshift
+
 
     # Fully omit the macromolecular baseline
     sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
     for n in ind['mac']:
-        params[sign,n].fill_(0)
-        params[sign,n+l].fill_(0)
+        params[sign,n].fill_(0) # amplitude
+        params[sign,n+l].fill_(0) # lorentzian
+        params[sign,n+2*l].fill_(0) # gaussian
+        params[sign,n+3*l+1].fill_(0) # fshift
 
     # Fully omit the lipid signal
     sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
     for n in ind['lip']:
-        params[sign,n].fill_(0)
-        params[sign,n+l].fill_(0)
+        params[sign,n].fill_(0) # amplitude
+        params[sign,n+l].fill_(0) # lorentzian
+        params[sign,n+2*l].fill_(0) # gaussian
+        params[sign,n+3*l+1].fill_(0) # fshift
 
     # Fully omit both lipid and macromolecular signal
     sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
     for n in ind['mac']:
-        params[sign,n].fill_(0)
-        params[sign,n+l].fill_(0)
-        params[sign,n+2*l].fill_(0)
+        params[sign,n].fill_(0) # amplitude
+        params[sign,n+l].fill_(0) # lorentzian
+        params[sign,n+2*l].fill_(0) # gaussian
+        params[sign,n+3*l+1].fill_(0) # fshift
     for n in ind['lip']:
-        params[sign,n].fill_(0)
-        params[sign,n+l].fill_(0)
-        params[sign,n+2*l].fill_(0)
+        params[sign,n].fill_(0) # amplitude
+        params[sign,n+l].fill_(0) # lorentzian
+        params[sign,n+2*l].fill_(0) # gaussian
+        params[sign,n+3*l+1].fill_(0) # fshift
 
     # Frequency Shift
     print('>>> Frequency Shift')
-    for i, n in enumerate(ind['f_shift']):
+    # Drop the global frequency shift
+    sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
+    params[sign,ind['f_shift']] = 0.0
+    for i, n in enumerate(ind['f_shifts']):
         sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
         params[sign,n] = 0.0 # Hz
     
-
     # Noise
     print('>>> Noise')
     sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
@@ -184,12 +210,32 @@ def simulate(config_file, args=None):
         # Values are sampled from a Gaussian mu=1, min/max=0/2
         # The linear SNR is calculated and scaled based on the number of transients
         # Then the linear SNR is scaled about 1.0 so mu = lin_snr
+        if config.coil_sens:
+            print('>>> Coil Sensitivities')
+            params[:,ind['coil_sens']] = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_sens']].shape)
 
-        print('>>> Coil Sensitivities')
-        params[:,ind['coil_sens']] = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_sens']].shape)
 
-
-
+    '''
+    If certain parts of the model are turned off, then their values should be zeroed out.
+    '''
+    if not config.b0:
+        params[:,ind['b0']].fill_(0.0)
+        for n in ind['b0_dir']: params[:,n].fill_(0.0)
+    # Coil_sens is dealt with above
+    # D is dealt with above
+    if not config.fshift_g: params[:,ind['f_shift']].fill_(0.0)
+    if not config.fshift_i:
+        for n in ind['f_shifts']: params[:,n].fill_(0.0)
+    # G is dealt with above
+    if not config.noise: params[:,ind['snr']].fill_(0.0)
+    if not config.phi0: params[:,ind['phi0']].fill_(0.0)
+    if not config.phi1: params[:,ind['phi1']].fill_(0.0)
+    # Transients are dealth with above
+    
+            
+    '''
+    Begin simulating and saving the spectra
+    '''
     first = True
     step = 10000
     threshold = args.batchSize
@@ -205,12 +251,14 @@ def simulate(config_file, args=None):
                              phi0=config.phi0,
                              phi1=config.phi1,
                              noise=config.noise, 
-                             fshift=config.fshift,
                              apodize=config.apodize,
                              offsets=True if baseline_cfg or resWater_cfg else False,
+                             fshift_g=config.fshift_g,
+                             fshift_i=config.fshift_i,
                              resample=config.resample,
                              snr_both=config.snr_both,
                              baselines=sample_baselines(n-i, **baseline_cfg) if baseline_cfg else False,
+                             coil_sens=config.coil_sens,
                              magnitude=config.magnitude,
                              zero_fill=config.zero_fill,
                              broadening=config.broadening,
@@ -254,16 +302,6 @@ def simulate(config_file, args=None):
                   ppm=pm.get_ppm(cropped=True).numpy())
         del spectra, fit, baseline, reswater, parameters, quantities
 
-
-def torch2numpy(input: dict):
-    for k, v in input.items():
-        if isinstance(input[k], dict):
-            torch2numpy(input[k])
-        elif torch.is_tensor(v):
-            input[k] = v.numpy()
-        else:
-            pass
-    return input
 
 
 def _save(path, spectra, fits, baselines, reswater, parameters, quantities, cropRange, ppm):
