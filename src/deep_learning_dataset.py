@@ -244,10 +244,11 @@ def simulate(config_file, args=None):
     for i in range(0,config.totalEntries,step):
         n = i+step if i+step<=params.shape[0] else i+(params.shape[0])
         outputs = pm.forward(params=params[i:n,:], 
+                             diff_edit=None,
                              b0=config.b0,
-                             fid=config.fid,
                              gen=True, 
                              eddy=False,
+                             fids=config.fids,
                              phi0=config.phi0,
                              phi1=config.phi1,
                              noise=config.noise, 
@@ -256,16 +257,16 @@ def simulate(config_file, args=None):
                              fshift_g=config.fshift_g,
                              fshift_i=config.fshift_i,
                              resample=config.resample,
-                             snr_both=config.snr_both,
                              baselines=sample_baselines(n-i, **baseline_cfg) if baseline_cfg else False,
                              coil_sens=config.coil_sens,
                              magnitude=config.magnitude,
+                             snr_combo=config.snr_combo,
                              zero_fill=config.zero_fill,
                              broadening=config.broadening,
                              transients=config.transients,
                              residual_water=sample_resWater(n-i, **resWater_cfg) if resWater_cfg else False,
                              drop_prob=config.drop_prob)
-        ppm = pm.get_ppm(cropped=True)
+        ppm = pm.get_ppm(cropped=False).numpy()
 
         if first:
             spectra, fit, baseline, reswater, parameters, quantities = outputs
@@ -285,8 +286,8 @@ def simulate(config_file, args=None):
                   reswater=reswater, 
                   parameters=sort_parameters(parameters, ind), 
                   quantities=quantities, 
-                  cropRange=config.cropRange, 
-                  ppm=pm.get_ppm(cropped=True).numpy())
+                  cropRange=pm.cropRange, 
+                  ppm=ppm)
             first = True
             counter += 1
             print('>>> ** {} ** <<<'.format(counter))
@@ -298,8 +299,8 @@ def simulate(config_file, args=None):
                   reswater=reswater, 
                   parameters=sort_parameters(parameters, ind), 
                   quantities=quantities, 
-                  cropRange=config.cropRange, 
-                  ppm=pm.get_ppm(cropped=True).numpy())
+                  cropRange=pm.cropRange, 
+                  ppm=ppm)
         del spectra, fit, baseline, reswater, parameters, quantities
 
 
