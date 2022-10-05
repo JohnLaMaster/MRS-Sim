@@ -973,6 +973,8 @@ class PhysicsModel(nn.Module):
             if gen: print('>>> Transients')
             fidSum = self.transients(fid=fidSum, 
                                      coil_sens=params[:,self.index['coil_sens']])
+            spectral_fit = self.transients(fid=spectral_fit, 
+                                           coil_sens=params[:,self.index['coil_sens']])
 
         # Add Noise
         if noise:
@@ -985,11 +987,12 @@ class PhysicsModel(nn.Module):
             if transients:
                 if snr_combo=='both':
                     # output.shape: [bS, ON\OFF, [noisy, noiseless], transients, channels, length]
-                    fidSum = torch.stack((fidSum.clone() + noise, fidSum), dim=1)
+                    fidSum = torch.stack((fidSum.clone() + noise, fidSum), dim=-4)
                 elif snr_combo=='avg':
                     # Produces more realistic noise profile
                     # output.shape: [bS, ON\OFF, channels, length]  
-                    fidSum = fidSum.mean(dim=1)
+                    fidSum = fidSum.mean(dim=-3)
+                    spectral_fit = spectral_fit.mean(dim=-3)
             else:
                 fidSum += noise
 
@@ -998,6 +1001,8 @@ class PhysicsModel(nn.Module):
             if gen: print('>>> Coil sensitivity')
             fidSum = self.coil_sensitivity(fid=fidSum, 
                                            coil_sens=params[:,self.index['coil_sens']])
+            spectral_fit = self.coil_sensitivity(fid=spectral_fit, 
+                                                 coil_sens=params[:,self.index['coil_sens']])
             
         # Rephasing Spectrum
         if phi0:
