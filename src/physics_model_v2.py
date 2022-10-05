@@ -41,7 +41,7 @@ def dict2tensors(dct: dict) -> dict:
         if isinstance(value, dict):
             dict2tensors(value)
 
-
+@torch.no_grad()
 class PhysicsModel(nn.Module):
     def __init__(self, 
                  PM_basis_set: str,
@@ -136,11 +136,11 @@ class PhysicsModel(nn.Module):
             self.difference_editing_fids = self.resample_(signal=self.difference_editing_fids,
                                                           ppm=self._ppm,
                                                           length=basisFcn_len,
-                                                          target_range=self.cropRange)
+                                                          target_range=[self._ppm.min(), self._ppm.max()])
         self.MM = self.MM + 1 if  self.MM>-1 else False
         self.lineshape_type = lineshape
 
-        if isinstance(cropRange, type(None)): cropRange = [self._ppm.min(), self._ppm.max()]
+#         if isinstance(cropRange, type(None)): cropRange = [self._ppm.min(), self._ppm.max()]
 
         '''
         bandwidth = 1/dwelltime
@@ -151,8 +151,8 @@ class PhysicsModel(nn.Module):
         freq_ref = ppm_ref * self.carrier_freq / 10e6
         phi1_ref = 2*self.PI*self.spectralwidth * (torch.linspace(-0.5*self.spectralwidth, 0.5*self.spectralwidth, self.l) + freq_ref)
         '''
-        self.ppm.float()
-        self.cropRange = cropRange
+#         self.ppm.float()
+        self.cropRange = cropRange if cropRange else [self._ppm.min(), self._ppm.max()]
         self.t = self.t.unsqueeze(-1).float()
         self._basis_metab = []
 
@@ -164,7 +164,7 @@ class PhysicsModel(nn.Module):
         self.syn_basis_fids = self.resample_(signal=self.syn_basis_fids,
                                              ppm=self._ppm,
                                              length=basisFcn_len,
-                                             target_range=self.cropRange)
+                                             target_range=[self._ppm.min(), self._ppm.max()])
         self._ppm = torch.linspace(self._ppm.min(), self._ppm.max(), basisFcn_len).unsqueeze(0)
         self.t = torch.linspace(self.t.min(), self.t.max(), basisFcn_len).unsqueeze(-1)
 
@@ -860,7 +860,8 @@ class PhysicsModel(nn.Module):
         the number of transients being simulated.
         '''
         # assert(fid.ndim==3) # Using difference editing would make it [bS, ON/OFF, channels, length] 
-        return fid.unsqueeze(-2).repeat_interleave(repeats=coil_sens.shape[-1], dim=-3)
+        # output.shape = [bS, ON/OFF, transients, channels, length] 
+        return fid.unsqueeze(-3).repeat_interleave(repeats=coil_sens.shape[-1], dim=-3)
 
     
     def zero_fill(self,
@@ -1069,8 +1070,9 @@ class PhysicsModel(nn.Module):
 
         if not isinstance(diff_edit, type(None)): 
             print('>>> Creating the difference spectra')
-            specSummed = torch.cat(specSummed, (specSummed[:,0,...] - specSummed[:,1,...]).unsqueeze(1), dim=1)
-            spectral_fit = torch.cat(spectral_fit, (spectral_fit[:,0,...] - spectral_fit[:,1,...]).unsqueeze(1), dim=1)
+            # Consensus paper recommends dividing difference spectra by 2. Not sure about any other consequenctial effects
+            specSummed = torch.cat(specSummed, (specSummed[:,0,...] - specSummed[:,1,...]).unsqueeze(1) / 2, dim=1)
+            spectral_fit = torch.cat(spectral_fit, (spectral_fit[:,0,...] - spectral_fit[:,1,...]).unsqueeze(1) / 2, dim=1)
             
             
         print('>>>>> Compiling spectra')
@@ -1079,7 +1081,7 @@ class PhysicsModel(nn.Module):
     def compile_outputs(self, 
                         specSummed: torch.Tensor, 
                         spectral_fit: torch.Tensor,
-                        offsets: dict,#(torch.Tensor,...), 
+                        offsets: dict,
                         params: torch.Tensor, 
                         denom: torch.Tensor,
                         b0: bool,
