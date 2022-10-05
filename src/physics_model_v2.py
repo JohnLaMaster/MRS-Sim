@@ -201,9 +201,13 @@ class PhysicsModel(nn.Module):
                 met = True
             elif m in self.basisFcns['artifacts'].keys(): 
                 temp = self.basisFcns['artifacts'][m]
-            elif m=='fshiftmet':
+            elif m in ['fshiftmet','fshiftmm']:
                 if not strt: strt = i 
-                try: temp = self.basisFcns['metabolites'][i]['fshift']
+                try: 
+                    temp = self.basisFcns['metabolites'][i]['fshift']
+                    # Workaround to allow for zero-shifts
+                    if temp['min']==0: temp['min'] = -1e-10
+                    if temp['max']==0: temp['max'] =  1e-10
                 except KeyError:
                     # If not included in the basis set, then set a default
                     default = 5 # Hz
@@ -729,7 +733,7 @@ class PhysicsModel(nn.Module):
         new = torch.linspace(start=target_range[0], end=target_range[1], steps=int(length)).to(signal.device)
         for i in range(signal.ndim - new.ndim): new = new.unsqueeze(0)
 
-        chs_interp = CubicHermiteInterp(ppm, torch.flip(signal, dims=[-1]))#self.ppm, torch.fliplr(signal))
+        chs_interp = CubicHermiteInterp(ppm, torch.flip(signal, dims=[-1]))
 
         return torch.flip(chs_interp.interp(new), dims=[-1])
     
@@ -846,6 +850,7 @@ class PhysicsModel(nn.Module):
         assert(fid.ndim==3)
         return fid.unsqueeze(1).repeat_interleave(repeats=coil_sens.shape[-1], dim=1)
 
+    
     def zero_fill(self,
                   fidSum: torch.Tensor,
                   fill: int,
@@ -859,6 +864,7 @@ class PhysicsModel(nn.Module):
         dim.append(fill - fidSum.shape[-1])
         return fidSum.cat(torch.zeros(dim, dim=-1))
 
+    
     def zeroOrderPhase(self, 
                        fid: torch.Tensor, 
                        phi0: torch.Tensor,
@@ -870,7 +876,7 @@ class PhysicsModel(nn.Module):
     def forward(self, 
                 params: torch.Tensor, 
                 b0: bool=True,
-                gen: bool=True, 
+                gen: bool=True,
                 eddy: bool=False,
                 fids: bool=False,
                 phi0: bool=True,
@@ -885,6 +891,7 @@ class PhysicsModel(nn.Module):
                 baselines: dict=None, 
                 coil_sens: bool=False,
                 magnitude: bool=True,
+                snr_combo: str=False,
                 zero_fill: int=False,
                 broadening: bool=True,
                 transients: bool=False,
@@ -914,7 +921,6 @@ class PhysicsModel(nn.Module):
         fid = self.modulate(params[:,self.index['metabolites']])
 
         # Apply B0 inhomogeneities
-        # print('line 1009: fid.shape {}, B0.shape {}'.format(fid.shape, B0.shape))
         if b0: fid *= B0
         
         # Line broadening
@@ -923,22 +929,20 @@ class PhysicsModel(nn.Module):
             fid = self.lineshape_correction(fid, params[:,self.index['d']], 
                                                  params[:,self.index['g']])
 
-
         # Basis Function-wise Frequency Shift
         if fshift_i:
             if gen: print('>>>>> Shifting individual frequencies')
             fidSum = self.frequency_shift(fid=fid, 
                                           param=params[:,self.index['f_shifts']])
-            # \todo: how to deal with zero shifts?
-                
+            
         # Summing the basis lines
+        # # Saves the unadulterated original as the spectral_fit and the max values
+        # # for the SNR calculations which should not consider artifacts.
         l = len(self._metab) - self.MM if self.MM else len(self._metab)
         fidSum, spectral_fit, mx_values = self.line_summing(fid=fid, 
                                                             params=params, 
                                                             mm=self.MM, 
                                                             l=l)
-        # Save these values for the SNR calculation. Should only consider 
-        # metabolites, not artifacts!
 
         # Add the Residual Water and Baselines
         if offsets:
@@ -952,7 +956,6 @@ class PhysicsModel(nn.Module):
             if gen: print('>>> Transients')
             fidSum = self.transients(fid=fidSum, 
                                      coil_sens=params[:,self.index['coil_sens']])
-            print('line 1046: fidSum.shape ',fidSum.shape)
 
         # Add Noise
         if noise:
@@ -962,41 +965,40 @@ class PhysicsModel(nn.Module):
                                         max_val=mx_values, 
                                         param=params[:,self.index['snr']], 
                                         transients=transient)
-            if snr_both:
-                print('fidSum.shape {}, noise.shape {}'.format(fidSum.shape, noise.shape))
-                # output.shape: [bS, [noisy, noiseless], transients, channels, length]
-                fidSum = torch.stack((fidSum.clone() + noise, fidSum), dim=1)
+            if transients:
+                if snr_combo=='both':
+                    # output.shape: [bS, [noisy, noiseless], transients, channels, length]
+                    fidSum = torch.stack((fidSum.clone() + noise, fidSum), dim=1)
+                elif snr_combo=='avg':
+                    # Produces more realistic noise profile
+                    # output.shape: [bS, channels, length]  
+                    fidSum = fidSum.mean(dim=1)
             else:
                 fidSum += noise
-            print('line 1060: fidSum.shape ',fidSum.shape)
 
         # Scale with coil senstivities
         if coil_sens:
             if gen: print('>>> Coil sensitivity')
             fidSum = self.coil_sensitivity(fid=fidSum, 
                                            coil_sens=params[:,self.index['coil_sens']])
-        print('line 1065: fidSum.shape ',fidSum.shape)
-
+            
         # Rephasing Spectrum
         if phi0:
             if gen: print('>>>>> Rephasing spectra - zero-order')
             fidSum = self.zeroOrderPhase(fid=fidSum, 
                                          phi0=params[:,self.index['phi0']])
-        print('line 1071: fidSum.shape ',fidSum.shape)
 
         # Rephasing Spectrum
         if phi1:
             if gen: print('>>>>> Rephasing spectra - first-order')
             fidSum = self.firstOrderPhase(fid=fidSum, 
                                           phi1=params[:,self.index['phi1']])
-        print('line 1077: fidSum.shape ',fidSum.shape)
         
         # Frequency Shift
         if fshift_g:
             if gen: print('>>>>> Shifting global frequencies')
             fidSum = self.frequency_shift(fid=fidSum, 
                                           param=params[:,self.index['f_shift']])
-        print('line 1083: fidSum.shape ',fidSum.shape)
 
         # Eddy Currents
         if eddy:
@@ -1014,28 +1016,23 @@ class PhysicsModel(nn.Module):
         if gen: print('>>>>> Recovering spectra')
         specSummed = Fourier_Transform(fidSum)
         spectral_fit = Fourier_Transform(spectral_fit)
-        print('line 1100: specSummed.shape ',specSummed.shape)
 
         # Crop and resample spectra
         if resample and not fids:
             specSummed = self.resample_(specSummed, length=self.length)
             spectral_fit = self.resample_(spectral_fit, length=self.length)
-            # specSummed = self.resample_(specSummed.flip(-1), length=self.length)
-            # spectral_fit = self.resample_(spectral_fit.flip(-1), length=self.length)
                      
         # Calculate magnitude spectra
         if magnitude:
             if gen: print('>>>>> Generating magnitude spectra')
             specSummed = self.magnitude(specSummed)
             spectral_fit = self.magnitude(spectral_fit)
-        print('line 1113: specSummed.shape ',specSummed.shape)
         
         # Normalize
         specSummed, denom = self.normalize(specSummed)
         spectral_fit, _ = self.normalize(spectral_fit, denom)
 
         # Convert normalized spectra back to time-domain
-        print('line 1119: specSummed.shape ',specSummed.shape)
         if fids:
             specSummed = self.magnitude(inv_Fourier_Transform(specSummed[...,0:2,:]))
             spectral_fit = self.magnitude(inv_Fourier_Transform(spectral_fit[...,0:2,:]))
@@ -1049,8 +1046,7 @@ class PhysicsModel(nn.Module):
 
 
         print('>>>>> Compiling spectra')
-        return self.compile_outputs(specSummed, spectral_fit, offset, \
-                                    params, denom, b0)
+        return self.compile_outputs(specSummed, spectral_fit, offset, params, denom, b0)
 
     def compile_outputs(self, 
                         specSummed: torch.Tensor, 
