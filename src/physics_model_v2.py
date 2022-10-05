@@ -42,7 +42,6 @@ def dict2tensors(dct: dict) -> dict:
             dict2tensors(value)
 
 
-
 class PhysicsModel(nn.Module):
     def __init__(self, 
                  PM_basis_set: str,
@@ -114,7 +113,8 @@ class PhysicsModel(nn.Module):
                    spectral_resolution: list=[10.0, 10.0, 10.0],
                    image_resolution: list=[0.5, 0.5, 0.5],
                    lineshape: str='voigt',
-                   fshift_i: bool=False
+                   fshift_i: bool=False,
+                   difference_editing: list=False, # should be a list of basis function names that gets subtracted
                   ):
         '''
         Steps: 
@@ -127,6 +127,16 @@ class PhysicsModel(nn.Module):
         '''
         
         self._metab, l, self.MM = self.order_metab(metab)
+        if difference_editing: 
+            self._difference_editing, l_diff, mm_diff  = self.order_metab(difference_editing)
+            assert(l==l_diff)
+            assert(self.MM==mm_diff)
+            self.difference_editing_fids = torch.stack([torch.as_tensor(self.basisFcns['metabolites'][m.lower()]['fid'], dtype=torch.float32) for m in self._difference_editing], dim=0).unsqueeze(0)
+            # Resample the basis functions, ppm, and t to the desired resolution
+            self.difference_editing_fids = self.resample_(signal=self.difference_editing_fids,
+                                                          ppm=self._ppm,
+                                                          length=basisFcn_len,
+                                                          target_range=self.cropRange)
         self.MM = self.MM + 1 if  self.MM>-1 else False
         self.lineshape_type = lineshape
 
@@ -504,8 +514,8 @@ class PhysicsModel(nn.Module):
             spectral_fit = fidSum.clone()
             mx_values = torch.amax(fid[...,0,:].unsqueeze(-2).sum(dim=-3).unsqueeze(1), dim=-1) 
         else:
-            mm = fid[:,l:,:,:].sum(dim=-3)
-            fidSum = fid[:,0:l,:,:].sum(dim=-3)
+            mm = fid[...,l:,:,:].sum(dim=-3)
+            fidSum = fid[...,0:l,:,:].sum(dim=-3)
             spectral_fit = fidSum.clone()
             mx_values = torch.amax(fidSum[...,0,:].unsqueeze(-2), dim=-1, keepdims=True) 
             fidSum += mm
@@ -591,10 +601,11 @@ class PhysicsModel(nn.Module):
     
 
     def modulate(self, 
+                 fids: torch.Tensor,
                  params: torch.Tensor,
                 ) -> torch.Tensor:
         params = params.unsqueeze(-1).unsqueeze(-1).repeat_interleave(2, dim=-2)
-        return params.mul(self.syn_basis_fids)
+        return params.mul(fids)
 
 
     def normalize(self, 
@@ -646,7 +657,8 @@ class PhysicsModel(nn.Module):
 
     def quantify_params(self, 
                         params: torch.Tensor,
-                        label=[]) -> torch.Tensor:
+                        label=[],
+                       ) -> torch.Tensor:
         delta = self.max_ranges - self.min_ranges
         minimum = self.min_ranges.clone()
         params = params.mul(delta) + minimum
@@ -762,7 +774,7 @@ class PhysicsModel(nn.Module):
         return res_water, raw_res_water
 
 
-    def set_parameter_constraints(self, cfg):
+    def set_parameter_constraints(self, cfg: dict):
         cfg_keys = cfg.keys()
 
         for k, ind in self._index.items():
@@ -847,8 +859,8 @@ class PhysicsModel(nn.Module):
         transients will have a much higher linear SNR that is dependent upon the expected final SNR and 
         the number of transients being simulated.
         '''
-        assert(fid.ndim==3)
-        return fid.unsqueeze(1).repeat_interleave(repeats=coil_sens.shape[-1], dim=1)
+        # assert(fid.ndim==3) # Using difference editing would make it [bS, ON/OFF, channels, length] 
+        return fid.unsqueeze(-2).repeat_interleave(repeats=coil_sens.shape[-1], dim=-3)
 
     
     def zero_fill(self,
@@ -875,6 +887,7 @@ class PhysicsModel(nn.Module):
 
     def forward(self, 
                 params: torch.Tensor, 
+                diff_edit: torch.Tensor=None,
                 b0: bool=True,
                 gen: bool=True,
                 eddy: bool=False,
@@ -902,7 +915,7 @@ class PhysicsModel(nn.Module):
         if params.ndim>=3: params = params.squeeze()  # convert 3d parameter matrix to 2d [batchSize, parameters]
         if params.ndim==1: params = params.unsqueeze(0) # Allows for batchSize = 1
 
-        params = self.quantify_params(params, label='forward')
+#         params = self.quantify_params(params, label='forward')
 
         # B0 inhomogeneities
         if b0:
@@ -918,7 +931,11 @@ class PhysicsModel(nn.Module):
 
         # Define basis spectra coefficients
         if gen: print('>>>>> Preparing metabolite coefficients')
-        fid = self.modulate(params[:,self.index['metabolites']])
+        fid = self.modulate(fids=self.syn_basis_fids, params=params[:,self.index['metabolites']])
+        if not isinstance(diff_edit, type(None)): 
+            fid = torch.stack((fid, self.modulate(fids=self.difference_editing_fids, 
+                                                  params=diff_edit[:,self.index['metabolites']])),
+                              dim=1)
 
         # Apply B0 inhomogeneities
         if b0: fid *= B0
@@ -967,11 +984,11 @@ class PhysicsModel(nn.Module):
                                         transients=transient)
             if transients:
                 if snr_combo=='both':
-                    # output.shape: [bS, [noisy, noiseless], transients, channels, length]
+                    # output.shape: [bS, ON\OFF, [noisy, noiseless], transients, channels, length]
                     fidSum = torch.stack((fidSum.clone() + noise, fidSum), dim=1)
                 elif snr_combo=='avg':
                     # Produces more realistic noise profile
-                    # output.shape: [bS, channels, length]  
+                    # output.shape: [bS, ON\OFF, channels, length]  
                     fidSum = fidSum.mean(dim=1)
             else:
                 fidSum += noise
@@ -1045,6 +1062,12 @@ class PhysicsModel(nn.Module):
                                               target_range=[self.t.amin(), self.t.amax()]).flip(dims=[-1])
 
 
+        if not isinstance(diff_edit, type(None)): 
+            print('>>> Creating the difference spectra')
+            specSummed = torch.cat(specSummed, (specSummed[:,0,...] - specSummed[:,1,...]).unsqueeze(1), dim=1)
+            spectral_fit = torch.cat(spectral_fit, (spectral_fit[:,0,...] - spectral_fit[:,1,...]).unsqueeze(1), dim=1)
+            
+            
         print('>>>>> Compiling spectra')
         return self.compile_outputs(specSummed, spectral_fit, offset, params, denom, b0)
 
