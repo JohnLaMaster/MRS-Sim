@@ -108,7 +108,7 @@ class PhysicsModel(nn.Module):
                    length: float=512,
                    basisFcn_len: float=1024,
                    ppm_ref: float=4.65,
-                   transients: int=8,
+                   num_coils: int=8,
                    coil_sens: bool=False,
                    spectral_resolution: list=[10.0, 10.0, 10.0],
                    image_resolution: list=[0.5, 0.5, 0.5],
@@ -192,12 +192,12 @@ class PhysicsModel(nn.Module):
             names.insert(-6,'fshiftmet')
             names.insert(-6,'fshiftmm')
             mult.insert(-6,l), mult.insert(-6,self.MM)
-        if transients>1: # Minimum 2 transients for the variables to be included in the model
-            names.append('transients')
-            mult.append(transients)
+        if num_coils>1: # Minimum 2 num_coils for the variables to be included in the model
+            names.append('multi_coil')
+            mult.append(num_coils)
             if coil_sens:
                 names.append('coil_sens')
-                mult.append(transients)
+                mult.append(num_coils)
         for n, m in zip(names, mult): 
             for _ in range(m): header.append(n)
             
@@ -253,10 +253,10 @@ class PhysicsModel(nn.Module):
         ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,3))) # directional deltas
 
         # # Coil sensitivities
-        if transients>1:
-            ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,transients)))
+        if num_coil>1:
+            ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,num_coil)))
             if coil_sens:
-                ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,transients)))
+                ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,num_coil)))
 
         # # Cummulative
         total = cnt(1)
@@ -269,8 +269,8 @@ class PhysicsModel(nn.Module):
         if fshift_i: dct.update({'F_Shifts': torch.empty(1)})
         dct.update({'SNR': torch.empty(1), 'Phi0': torch.empty(1), 'Phi1': torch.empty(1), 'B0': torch.empty(1), 
                     'B0_dir': torch.empty(1)})
-        if transients: 
-            dct.update({'Transients': torch.empty(1)})
+        if num_coil>1: 
+            dct.update({'Multi_Coil': torch.empty(1)})
             if coil_sens: dct.update({'Coil_Sens': torch.empty(1)})
         dct.update({'Metabolites': torch.empty(1), 'Parameters': torch.empty(1), 'Overall': torch.empty(1)})
         
@@ -848,12 +848,12 @@ class PhysicsModel(nn.Module):
         return ch_interp.interp(xs=target_ppm)
 
             
-    def transients(self, 
+    def multicoil(self, 
                    fid: torch.Tensor, 
-                   coil_sens: torch.Tensor,
+                   multi_coil: torch.Tensor,
                   ) -> torch.Tensor:
         '''
-        This function simply creates the number of transients. Noise and scaling
+        This function creates transients according to the number of specified coils. Noise and scaling
         are done separately.
         The SNR dB value provided is the SNR of the final, coil combined spectrum. Therefore, each of the 
         transients will have a much higher linear SNR that is dependent upon the expected final SNR and 
@@ -861,7 +861,7 @@ class PhysicsModel(nn.Module):
         '''
         # assert(fid.ndim==3) # Using difference editing would make it [bS, ON/OFF, channels, length] 
         # output.shape = [bS, ON/OFF, transients, channels, length] 
-        return fid.unsqueeze(-3).repeat_interleave(repeats=coil_sens.shape[-1], dim=-3)
+        return fid.unsqueeze(-3).repeat_interleave(repeats=multi_coil.shape[-1], dim=-3)
 
     
     def zero_fill(self,
@@ -904,10 +904,10 @@ class PhysicsModel(nn.Module):
                 baselines: dict=None, 
                 coil_sens: bool=False,
                 magnitude: bool=True,
+                multicoil: bool=False,
                 snr_combo: str=False,
                 zero_fill: int=False,
                 broadening: bool=True,
-                transients: bool=False,
                 residual_water: dict=None,
                 drop_prob: float=None,
                ) -> torch.Tensor:
@@ -969,40 +969,43 @@ class PhysicsModel(nn.Module):
                                               drop_prob=drop_prob)
 
         # Create the transient copies
-        if transients:
+        if multicoil:
             if gen: print('>>> Transients')
-            fidSum = self.transients(fid=fidSum, 
-                                     coil_sens=params[:,self.index['coil_sens']])
-            spectral_fit = self.transients(fid=spectral_fit, 
-                                           coil_sens=params[:,self.index['coil_sens']])
+            fidSum = self.multicoil(fid=fidSum, 
+                                    multi_coil=params[:,self.index['multi_coil']])
+            spectral_fit = self.multicoil(fid=spectral_fit, 
+                                          multi_coil=params[:,self.index['multi_coil']])
 
         # Add Noise
         if noise:
             if gen: print('>>>>> Adding noise')
-            transient = params[:,self.index['transients']] if transients else None
+            transients = params[:,self.index['multi_coil']] if transients else None
             noise = self.generate_noise(fid=fidSum, 
                                         max_val=mx_values, 
                                         param=params[:,self.index['snr']], 
-                                        transients=transient)
-            if transients:
+                                        transients=transients)
+            if not isinstance(transients, type(None)):
                 if snr_combo=='both':
+                    # Keep both noisey transients and clean transients
                     # output.shape: [bS, ON\OFF, [noisy, noiseless], transients, channels, length]
                     fidSum = torch.stack((fidSum.clone() + noise, fidSum), dim=-4)
-                elif snr_combo=='avg':
+
+                # Scale with coil senstivities
+                if coil_sens:
+                    assert(multicoil)
+                    if gen: print('>>> Coil sensitivity')
+                    fidSum = self.coil_sensitivity(fid=fidSum, 
+                                                   coil_sens=params[:,self.index['coil_sens']])
+                    spectral_fit = self.coil_sensitivity(fid=spectral_fit, 
+                                                         coil_sens=params[:,self.index['coil_sens']])
+
+                if snr_combo=='avg':
                     # Produces more realistic noise profile
                     # output.shape: [bS, ON\OFF, channels, length]  
                     fidSum = fidSum.mean(dim=-3)
                     spectral_fit = spectral_fit.mean(dim=-3)
             else:
                 fidSum += noise
-
-        # Scale with coil senstivities
-        if coil_sens:
-            if gen: print('>>> Coil sensitivity')
-            fidSum = self.coil_sensitivity(fid=fidSum, 
-                                           coil_sens=params[:,self.index['coil_sens']])
-            spectral_fit = self.coil_sensitivity(fid=spectral_fit, 
-                                                 coil_sens=params[:,self.index['coil_sens']])
             
         # Rephasing Spectrum
         if phi0:
