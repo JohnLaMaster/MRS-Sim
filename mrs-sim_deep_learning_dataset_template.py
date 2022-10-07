@@ -39,7 +39,8 @@ def simulate(config_file, args=None):
                   num_coils=config.num_coils,
                   spectral_resolution=config.spectral_resolution,
                   image_resolution=config.image_resolution,
-                  lineshape=config.lineshape)
+                  lineshape=config.lineshape,
+                  spectralwidth=config.spectralwidth)
 
     if parameters: pm.set_parameter_constraints(parameters)
     ind = pm.index
