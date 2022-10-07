@@ -33,7 +33,7 @@ def simulate(config_file, args=None):
                   cropRange=config.cropRange,
                   length=config.spectrum_length,
                   ppm_ref=config.ppm_ref,
-                  transients=config.transients,
+                  num_coils=config.num_coils,
                   spectral_resolution=config.spectral_resolution,
                   image_resolution=config.image_resolution,
                   lineshape=config.lineshape)
@@ -203,10 +203,10 @@ def simulate(config_file, args=None):
         sign = torch.tensor([True if torch.rand([1]) > p else False for _ in range(params.shape[0])])
         params[sign,n].fill_(0.5) # 1 Hz minimum
 
-    if config.transients>1:
+    if config.num_coils>1:
         # drop_prob does not affect these parameters
         print('>>> Transients')
-        params[:,ind['transients']] = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['transients']].shape)
+        params[:,ind['multi_coil']] = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['multi_coil']].shape)
         # Values are sampled from a Gaussian mu=1, min/max=0/2
         # The linear SNR is calculated and scaled based on the number of transients
         # Then the linear SNR is scaled about 1.0 so mu = lin_snr
@@ -260,10 +260,10 @@ def simulate(config_file, args=None):
                              baselines=sample_baselines(n-i, **baseline_cfg) if baseline_cfg else False,
                              coil_sens=config.coil_sens,
                              magnitude=config.magnitude,
+                             multicoil=config.num_coils,
                              snr_combo=config.snr_combo,
                              zero_fill=config.zero_fill,
                              broadening=config.broadening,
-                             transients=config.transients,
                              residual_water=sample_resWater(n-i, **resWater_cfg) if resWater_cfg else False,
                              drop_prob=config.drop_prob)
         ppm = pm.get_ppm(cropped=False).numpy()
