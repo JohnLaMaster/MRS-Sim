@@ -35,43 +35,28 @@ def complex_exp(signal: torch.Tensor,
     real = signal[...,0,:].mul(torch.cos(theta[...,1,:])) - signal[...,1,:].mul(torch.sin(theta[...,1,:]))
     imag = signal[...,0,:].mul(torch.sin(theta[...,1,:])) + signal[...,1,:].mul(torch.cos(theta[...,1,:]))
 
-    # print('real.shape {}, imag.shape {}'.format(real.shape,imag.shape))
-
     return torch.cat([real.unsqueeze(-2), imag.unsqueeze(-2)], dim=-2)
 
 
 def convertdict(file, simple=False, device='cpu'):
-    from types import SimpleNamespace
-    import numpy as np
-    if simple:
-        p = SimpleNamespace(**file) # self.basisSpectra
-        keys = [y for y in dir(p) if not y.startswith('__')]
-        for i in range(len(keys)):
-            file[keys[i]] = torch.FloatTensor(np.asarray(file[keys[i]], dtype=np.float32)).squeeze().to(device)
-        return SimpleNamespace(**file)
-    else:
-        delete = []
-        for k, v in file.items():
-            if not k.startswith('__') and not ('None' in k):
-                if isinstance(v, dict):
-                    for kk, vv in file[k].items():
-                        file[k][kk] = torch.FloatTensor(np.asarray(file[k][kk], dtype=np.float32)).squeeze().to(device)
-                elif k=='linenames':
-                    file[k] = dict({str(a): torch.FloatTensor(np.asarray(b, dtype=np.float32)).to(device) for a, b in zip(file[k][0,:], file[k][1,:])})
-                elif k in ['notes', 'seq']: #isinstance(v, str):
-                    delete.append(k)
-                else:
-                    try:
-                        # print(k)
-                        file[k] = torch.FloatTensor(np.asarray(file[k], dtype=np.float32)).squeeze().to(device)
-                    except TypeError:
-                        pass
-            else:
+    delete = []
+    for k, v in file.items():
+        if not k.startswith('__') and not ('None' in k):
+            if isinstance(v, dict):
+                convertdict(file[k], device)
+            elif k=='linenames':
+                file[k] = dict({str(a): torch.from_numpy(np.asarray(b, dtype=np.float32)).to(device) for a, b in zip(file[k][0,:], file[k][1,:])})
+            elif k in ['notes', 'seq','vendor']:
                 delete.append(k)
-        if len(delete)>0:
-            for k in delete:
-                file.pop(k, None)
-        return file
+            else:
+                file[k] = torch.from_numpy(np.asarray(file[k], dtype=np.float32)).squeeze().to(device)
+        else:
+            delete.append(k)
+    if len(delete)>0:
+        for k in delete:
+            file.pop(k, None)
+            
+    return file if not simple else SimpleNamespace(**file)
 
 
 class counter():
@@ -93,6 +78,12 @@ class counter():
 
     def reset(self):
         self._count = copy.copy(self.start)
+
+
+def dict2tensors(dct: dict) -> dict:
+    for key, value in dct.items():
+        if isinstance(value, dict):
+            dict2tensors(value)
 
 
 def rand_omit(data: torch.Tensor, value: float=0., p: float=0.2):
@@ -146,7 +137,6 @@ def inv_Fourier_Transform(signal: torch.Tensor,
                           normalize: bool=False) -> torch.Tensor:#, 
     assert(signal.ndim>=3)
     signal = signal.transpose(-1,-2)
-    print('signal.shape: ',signal.shape)
     assert(signal.shape[-1]==2)
     signal = torch.view_as_complex(signal.contiguous())
     signal = torch.view_as_real(ifft(ifftshift(signal, dim=-1),dim=-1)).transpose(-1,-2)
@@ -165,28 +155,27 @@ def batch_smooth(x: torch.Tensor,
         for _ in range(x.ndim - window_len.ndim): 
             window_len = window_len.unsqueeze(0)
         window_len = window_len.repeat(x.shape[1], 1, 1)
-    # print('window_len: ',window_len)
-    w_len = (x.shape[-1] * window_len).int()#.repeat(x.shape[0], 1, 1)
-    # print('w_len.shape: ',w_len.shape)
+        
+    w_len = (x.shape[-1] * window_len).int()
+
     mx, threshold = w_len.max().item(), torch.div(w_len.squeeze(), 2, rounding_mode='floor')
     even = mx if mx % 2 == 0 else mx + 1
     w = torch.zeros((1, mx), dtype=torch.float32).repeat(x.shape[1], 1)
-    # print(w.shape)
+    
     for i in range(even//2):
         ind = (i<threshold)
-        # print('ind: ',ind)
         w[ind, i] = 1
     w = w.roll(even//2, -1)
     w = w + w.flip(-1)
     w[(w==2)] = 1
-    # print(w.shape)
     w /= w.sum(dim=-1, keepdims=True)
     w = w.unsqueeze(1)
+
     out = F.conv1d(input=F.pad(x, (even, even), mode=mode), weight=w, groups=w.shape[0]).permute(1,0,2)
     start, stop = even//2, -even//2-1 if even==mx else -even//2-2
-    out = out[...,start:stop]
-    return out
-
+    return out[...,start:stop]
+    
+    
 def smooth(x: torch.Tensor,
            window_len: float=0.1,
            window: str='flat') -> torch.Tensor:
@@ -196,7 +185,6 @@ def smooth(x: torch.Tensor,
     w /= w.sum()
     out = F.conv1d(input=F.pad(x, (w_len, w_len), mode='reflect'), weight=w)
     out = out[...,w_len//2:-w_len//2-1]
-    print(x.shape, out.shape)
     assert(x.shape==out.shape)
     return out
 
@@ -242,23 +230,17 @@ def _save(path: str,
 def OrderOfMagnitude(data: torch.Tensor):
     for d in range(data.ndim-1,0,-1):
         data = data.amax(d, keepdims=True)
-    # print('OrderOfMagnitude data.shape ',data.shape)
     return torch.floor(torch.log10(data))
 
 
 def sample_resWater(N: int, **cfg):
-                    # N: int, 
-                    # upper: list=[0,1], 
-                    # lower: list=[0,1], 
-                    # window: float=0.05,
-                    # length: int=2048,
-                    # cR_water: list=[3.7, 5.4],
-                    # cR: list=[0.2, 4.2],
-                    # prime: float=0.15,
-                    # drop_prob: float=0.2)
     if not isinstance(cfg, type(None)):
+        try: cfg['pt_density']
+        except: cfg['pt_density'] = 1204
         start, _ = rand_omit(torch.zeros(N,1,1).uniform_(0,cfg['prime']), 0.0, cfg['drop_prob'])
         end, _   = rand_omit(torch.zeros(N,1,1).uniform_(0,cfg['prime']), 0.0, cfg['drop_prob'])
+        length = round((cfg['cropRange_water'][1] - cfg['cropRange_water'][0])*cfg['pt_density'])
+        if length % 2 != 0: length += 1
         return {
             'start': torch.zeros(N,1,1),
             'end': torch.zeros(N,1,1),
@@ -266,9 +248,9 @@ def sample_resWater(N: int, **cfg):
             'upper_bnd': torch.ones(N,1,1).uniform_(cfg['upper'][0],cfg['upper'][1]),
             'lower_bnd': torch.ones(N,1,1).uniform_(cfg['lower'][0],cfg['lower'][1]) * -1,
             'windows': torch.zeros(N,1,1).fill_(cfg['window']),
-            'length': cfg['length'],
-            'cropRange_resWater': cfg['cR_water'],
-            'cropRange': cfg['cR'],
+            'length': length,
+            'cropRange_resWater': cfg['cropRange_water'],
+            'cropRange': cfg['cropRange'],
             'start_prime': start,
             'end_prime': end,
             'scale': cfg['scale'],
@@ -278,14 +260,11 @@ def sample_resWater(N: int, **cfg):
 
 
 def sample_baselines(N: int, **cfg): 
-                     # N: int, 
-                     # upper: float=1, 
-                     # lower: float=-1, 
-                     # window: list=[0.1,0.3],
-                     # length: int=512,
-                     # cR: list=[0.2, 4.2],
-                     # drop_prob: float=0.2)
     if not isinstance(cfg, type(None)):
+        try: cfg['pt_density']
+        except: cfg['pt_density'] = 128
+        length = round((cfg['cropRange'][1]-cfg['cropRange'][0])*cfg['pt_density'])
+        if length % 2 != 0: length += 1
         return {
             'start': torch.zeros(N,1,1).uniform_(cfg['start'][0],cfg['start'][1]),
             'end': torch.zeros(N,1,1).uniform_(cfg['end'][0],cfg['end'][1]),
@@ -293,8 +272,8 @@ def sample_baselines(N: int, **cfg):
             'upper_bnd': cfg['upper'],
             'lower_bnd': cfg['lower'],
             'windows': torch.ones(N,1,1).uniform_(cfg['window'][0],cfg['window'][1]),
-            'length': cfg['length'],
-            'cropRange': cfg['cR'],
+            'length': length,
+            'cropRange': cfg['cropRange'],
             'scale': cfg['scale'],
             'rand_omit': cfg['drop_prob'],
         }
@@ -314,7 +293,6 @@ def torch2numpy(input: dict):
 def sort_parameters(params: torch.Tensor,
                     index: dict):
     parameters = OrderedDict()
-    # keys = list(index.keys())
     for i, k in enumerate(index.keys()):
         if not k in ['metabolites', 'parameters', 'overall']:
             parameters.update({k: params[:,index[k]]})
