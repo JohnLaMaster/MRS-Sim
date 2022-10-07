@@ -46,7 +46,6 @@ def simulate(config_file, args=None):
     l = len(ind['metabolites'])
 
     
-    print('>>> Metabolite Quantities')
     for k, v in ind.items():
         if isinstance(v, tuple):
             ind[k] = list(ind[k])
@@ -66,46 +65,35 @@ def simulate(config_file, args=None):
     # Quantify parameters
     params = pm.quantify_params(params)
     
+    
     '''
     This next section of code will need to be customized for your own implementations.
     '''
-
     # All metabolite values are ratios wrt creatine. Therefore, Cr is always 1.0
     params[:,ind['cr']].fill_(1.0)
-
-    '''
-    If you want to use a covariance matrix for sampling metabolite amplitudes, this is where covmat and loc 
-    should be defined. 
-    Use the ind variable to move the sampled parameters to the correct indices. The exact implementation will
-    depend on the variables and order of variables that are included in your covariance matrix.
-    '''
-    # if config.use_covmat:
-    #     # _, mtb_ind = pm.basis_metab
-    #     # print('mtb_ind: ',mtb_ind)
-    #     # covmat = torch.as_tensor(config.covmat) # 2D matrix
-    #     # loc = torch.as_tensor(config.loc) # 1D matrix
-    #     # mets = torch.distributions.multivariate_normal.MultivariateNormal(loc=loc,
-    #     #                                                                   covariance_matrix=covmat)
-    #     # start, stop = mtb_ind[0], mtb_ind[-1]
-    #     # params[:,start:stop+1] = mets.rsample([params.shape[0]])
-    #     _, mtb_ind = pm.basis_metab
-    #     print('mtb_ind: ',mtb_ind)
-    #     covmat = torch.as_tensor(config.covmat) # 2D matrix
-    #     loc = torch.as_tensor(config.loc) # 1D matrix
-    #     mets = torch.distributions.multivariate_normal.MultivariateNormal(loc=loc,
-    #                                                                       covariance_matrix=covmat)
-    #     start, stop = mtb_ind[0], mtb_ind[-1]
-    #     temp = mets.rsample([params.shape[0]])        
-    #     params[:,start:stop+1] = torch.cat(temp[...,0], torch.ones_like(temp[...,0]), temp[...,-1], dim=-1)
-    # print(params.shape)
+    
+    if config.use_covmat:
+        '''
+        If you want to use a covariance matrix for sampling metabolite amplitudes, this is where covmat and loc 
+        should be defined. 
+        Use the ind variable to move the sampled parameters to the correct indices. The exact implementation will
+        depend on the variables and order of variables that are included in your covariance matrix.
+        '''
+        _, mtb_ind = pm.basis_metab
+        # print('mtb_ind: ',mtb_ind)
+        covmat = torch.as_tensor(config.covmat['matrix']) # 2D matrix
+        loc = torch.as_tensor(config.covmat['loc']) # 1D matrix
+        mets = torch.distributions.multivariate_normal.MultivariateNormal(loc=loc, covariance_matrix=covmat)
+        start, stop = mtb_ind[0], mtb_ind[-1]
+        temp = mets.sample([params.shape[0]])        
+        params[:,start:stop+1] = torch.cat(temp[...,0], torch.ones_like(temp[...,0]), temp[...,:-1], dim=-1)
 
     '''
     The next section of code is used to drop some parameters from each spectrum for deep learning applications.
     Should you want to use different distributions for some of the parameters, the following can be used as a 
     guide. Defining different distributions can be done before OR after quantifying the parameters.
     '''
-    
-    print('>>> Line Broadening')
+    print('>>> Metabolite Quantities & Lineshape Profiles')
     keys, g = ind.keys(), 0
     for k in keys: g += 1 if 'mm' in k else 0
     for k in keys: g += 1 if 'lip' in k else 0
@@ -208,7 +196,7 @@ def simulate(config_file, args=None):
 
     if config.num_coils>1:
         # drop_prob does not affect these parameters
-        print('>>> Transients')
+        print('>>> Multiple Coils')
         params[:,ind['multi_coil']] = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['multi_coil']].shape)
         # Values are sampled from a Gaussian mu=1, min/max=0/2
         # The linear SNR is calculated and scaled based on the number of transients
