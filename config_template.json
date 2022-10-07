@@ -8,6 +8,7 @@
     "cropRange": null, 
     "lineshape": "voigt",
     "use_covmat": false, 
+    "spectralwidth": null,
     "residual_water": false,
     "spectrum_length": 1024, 
     "image_resolution":    [ 0.5,  0.5,  0.5],
