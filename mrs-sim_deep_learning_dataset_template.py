@@ -40,7 +40,8 @@ def simulate(config_file, args=None):
                   spectral_resolution=config.spectral_resolution,
                   image_resolution=config.image_resolution,
                   lineshape=config.lineshape,
-                  spectralwidth=config.spectralwidth)
+                  spectralwidth=config.spectralwidth,
+                  basisFcn_len=config.basis_fcn_length)
 
     if parameters: pm.set_parameter_constraints(parameters)
     ind = pm.index
