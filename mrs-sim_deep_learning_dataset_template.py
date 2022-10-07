@@ -6,11 +6,14 @@ import sys
 import numpy as np
 import scipy.io as io
 import torch
+
 from aux import concat_dict, sort_parameters, torch2numpy
 from pm_v2 import PhysicsModel
 from types import SimpleNamespace
 
+
 sys.path.append('../')
+
 
 
 def simulate(config_file, args=None):
