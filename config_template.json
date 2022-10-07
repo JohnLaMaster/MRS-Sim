@@ -1,0 +1,83 @@
+{
+    "totalEntries": 10,
+    "PM_basis_set": "press_ge_144.mat",
+    "metabolites": ["PCh", "Cr", "NAA"], 
+    "B0": 3.0, 
+    "TE": 144,
+    "vendor": "GE",
+    "cropRange": null, 
+    "lineshape": "voigt",
+    "use_covmat": false, 
+    "residual_water": false,
+    "spectrum_length": 1024, 
+    "image_resolution":    [ 0.5,  0.5,  0.5],
+    "spectral_resolution": [10.0, 10.0, 10.0],
+
+
+    "b0": true,
+    "fids": true,
+    "fshift_g": true,
+    "fshift_i": false,
+    "phi0": true,
+    "phi1": true,
+    "noise": true,
+    "apodize": false,
+    "mm_lip": true,
+    "num_coils": 8,
+    "coil_sens": true,
+    "snr_combo": "both",
+    "broadening": true,
+    "magnitude": true,
+    "zero_fill": false,
+    "resample": false,
+    "drop_prob": 0.2,
+    "snr": [5, 30], 
+    "ppm_ref": 4.65,
+    "covmat": {"matrix": null,
+               "loc":    null},
+
+
+    "parameters": {
+        "_d":              [     0,    10],
+        "_g":              [     0, 71.71],
+        "_dmm":            [     0,   100],
+        "_gmm":            [     0, 71.71],
+        "f_shift":         [   -10,    10],
+        "phi0":            [  -0.1,   0.1], 
+        "phi1":            [ -0.05,  0.05], 
+        "b0_dir":          [  -2.5,     5],
+        "ppm_ref":            4.65, 
+        "snr_min":         [     5,    30], 
+        "b0":              [  -100,   200], 
+        "mm0":             [     0,     5],
+        "lip0":            [     0,     5]
+    },
+
+
+    "baseline_cfg": {
+        "start":           [  -0.5,   0.5],
+        "end":             [    -1,     1],
+        "upper":                 1,
+        "lower":                -1,
+        "std":             [  0.05,  0.20],
+        "window":          [   0.1,   0.3],
+        "pt_density":          128,
+        "cropRange":       [    -1,     6],
+        "scale":               0.5,
+        "drop_prob":           0.2
+    },
+    
+
+    "resWater_cfg": {
+        "upper":           [     0,     1],
+        "lower":           [     0,     1],
+        "std":             [  0.05,  0.40],
+        "window":             0.05,
+        "pt_density":         1204,
+        "cropRange_water": [   3.7,   5.4],
+        "cropRange":       [     0,     5],
+        "prime":              0.15,
+        "scale":               0.5,
+        "drop_prob":           0.2
+    }
+}
