@@ -104,18 +104,19 @@ class PhysicsModel(nn.Module):
        
     def initialize(self, 
                    metab: list=['Cho','Cre','Naa','Glx','Ins','Mac','Lip'],
-                   cropRange: list=[0,5],
-                   length: float=512,
                    basisFcn_len: float=1024,
-                   ppm_ref: float=4.65,
-                   num_coils: int=8,
                    coil_sens: bool=False,
-                   spectral_resolution: list=[10.0, 10.0, 10.0],
-                   image_resolution: list=[0.5, 0.5, 0.5],
-                   lineshape: str='voigt',
-                   fshift_i: bool=False,
+                   cropRange: list=[0,5],
                    difference_editing: list=False, # should be a list of basis function names that gets subtracted
-                  ):
+                   fshift_i: bool=False,
+                   image_resolution: list=[0.5, 0.5, 0.5],
+                   length: float=512,
+                   lineshape: str='voigt',
+                   num_coils: int=1,
+                   ppm_ref: float=4.65,
+                   spectral_resolution: list=[10.0, 10.0, 10.0],
+                   spectralwidth=None,
+                  ) -> tuple:
         '''
         Steps: 
         - based on the desired fitting range, calculate the necessary number of splines
@@ -155,6 +156,8 @@ class PhysicsModel(nn.Module):
         self.cropRange = cropRange if cropRange else [self._ppm.min(), self._ppm.max()]
         self.t = self.t.unsqueeze(-1).float()
         self._basis_metab = []
+        if not isinstance(spectralidth, type(None)):
+            self.spectralwidth = spectralwidth
 
         dct = OrderedDict()
         for m in self._metab: dct.update({str(m): torch.empty(1)})  # Add metabolite names to dictionary
@@ -728,6 +731,7 @@ class PhysicsModel(nn.Module):
                   ppm: torch.Tensor=None,
                   length: int=512,
                   target_range: list=None,
+                  flip: bool=True,
                  ) -> torch.Tensor:
         '''
         Basic Cubic Hermite Spline Interpolation of :param signal: with no additional scaling.
@@ -745,9 +749,14 @@ class PhysicsModel(nn.Module):
         new = torch.linspace(start=target_range[0], end=target_range[1], steps=int(length)).to(signal.device)
         for i in range(signal.ndim - new.ndim): new = new.unsqueeze(0)
 
-        chs_interp = CubicHermiteInterp(ppm, torch.flip(signal, dims=[-1]))
+        if flip: signal = torch.flip(signal, dims=[-1])
 
-        return torch.flip(chs_interp.interp(new), dims=[-1])
+        chs_interp = CubicHermiteInterp(ppm, signal)#self.ppm, torch.fliplr(signal))
+        signal = chs_interp.interp(new)
+
+        if flip: return torch.flip(signal, dims=[-1])
+
+        return signal
     
     
     def residual_water(self,
@@ -1038,14 +1047,15 @@ class PhysicsModel(nn.Module):
             fidSum = self.zero_fill(fid=fidSum, fill=zero_fill)
 
         # Recover Spectrum
-        if gen: print('>>>>> Recovering spectra')
-        specSummed = Fourier_Transform(fidSum)
-        spectral_fit = Fourier_Transform(spectral_fit)
+        if not fids:
+            if gen: print('>>>>> Recovering spectra')
+            specSummed = Fourier_Transform(fidSum)
+            spectral_fit = Fourier_Transform(spectral_fit)
 
-        # Crop and resample spectra
-        if resample and not fids:
-            specSummed = self.resample_(specSummed, length=self.length)
-            spectral_fit = self.resample_(spectral_fit, length=self.length)
+            # Crop and resample spectra
+            if resample:
+                specSummed = self.resample_(specSummed, length=self.length)
+                spectral_fit = self.resample_(spectral_fit, length=self.length)
                      
         # Calculate magnitude spectra
         if magnitude:
@@ -1058,16 +1068,14 @@ class PhysicsModel(nn.Module):
         spectral_fit, _ = self.normalize(spectral_fit, denom)
 
         # Convert normalized spectra back to time-domain
-        if fids:
-            specSummed = self.magnitude(inv_Fourier_Transform(specSummed[...,0:2,:]))
-            spectral_fit = self.magnitude(inv_Fourier_Transform(spectral_fit[...,0:2,:]))
-            if resample:
-                num_pts = zero_fill if zero_fill else self.length
-                t = torch.linspace(self.t.amin(), self.t.amax(), max(self.t.squeeze().shape))
-                specSummed = self.resample_(specSummed.flip(dims=[-1]), length=self.length, ppm=t, 
-                                            target_range=[self.t.amin(), self.t.amax()]).flip(dims=[-1])
-                spectral_fit = self.resample_(spectral_fit.flip(dims=[-1]), length=self.length, ppm=t, 
-                                              target_range=[self.t.amin(), self.t.amax()]).flip(dims=[-1])
+        if fids and resample:
+            num_pts = zero_fill if zero_fill else self.length
+            t = torch.linspace(self.t.amin(), self.t.amax(), max(self.t.squeeze().shape))
+            specSummed = self.resample_(specSummed, length=self.length, ppm=t, flip=False,
+                                        target_range=[self.t.amin(), self.t.amax()])
+            spectral_fit = self.resample_(spectral_fit, length=self.length, ppm=t, flip=False,
+                                          target_range=[self.t.amin(), self.t.amax()])
+
 
 
         if not isinstance(diff_edit, type(None)): 
