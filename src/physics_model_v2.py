@@ -1039,9 +1039,13 @@ class PhysicsModel(nn.Module):
                                         param=params[:,self.index['snr']], 
                                         transients=transients)
             if not isinstance(transients, type(None)):
+#                 stack = False if not snr_combo=='both' else True
                 if snr_combo=='both':
                     # Keep both noisey transients and clean transients
                     # output.shape: [bS, ON\OFF, [noisy, noiseless], transients, channels, length]
+#                     clean = fidSum.clone().unsqueeze(-4)
+#                     fidSum += noise
+#                     fidSum = fidSum.unsqueeze(-4)
                     fidSum = torch.stack((fidSum.clone() + noise, fidSum), dim=-4)
 
                 # Scale with coil senstivities
@@ -1053,6 +1057,9 @@ class PhysicsModel(nn.Module):
                                                    coil_sens=params[:,self.index['coil_sens']])
                     spectral_fit = self.coil_sensitivity(fid=spectral_fit, 
                                                          coil_sens=params[:,self.index['coil_sens']])
+#                     if stack:
+#                         clean = self.coil_sensitivity(fid=clean, 
+#                                                       coil_sens=params[:,self.index['coil_sens']])
 
                 if coil_fshift:
                     assert(multicoil)
@@ -1061,14 +1068,23 @@ class PhysicsModel(nn.Module):
                                                   coil_fshift=params[:,self.index['coil_fshift']])
                     spectral_fit = self.coil_freq_drift(fid=spectral_fit, 
                                                         coil_sens=params[:,self.index['coil_fshift']])
+#                     if stack:
+#                         clean = self.coil_freq_drift(fid=clean, 
+#                                                      coil_sens=params[:,self.index['coil_fshift']])
 
                 if coil_phi0:
                     assert(multicoil)
                     if gen: print('>>> Coil Phase Drift')
                     fidSum = self.coil_phi0_drift(fid=fidSum, 
                                                   coil_phi0=params[:,self.index['coil_phi0']])
+#                     if stack:
+#                         clean = self.coil_phi0_drift(fid=clean, 
+#                                                      coil_phi0=params[:,self.index['coil_phi0']])
 
 
+#                 if snr_combo=='both':
+#                     fidSum = torch.cat([fidSum, clean], dim=-4)
+#                 el
                 if snr_combo=='avg':
                     # Produces more realistic noise profile
                     # output.shape: [bS, ON\OFF, channels, length]  
@@ -1076,6 +1092,7 @@ class PhysicsModel(nn.Module):
                     spectral_fit = spectral_fit.mean(dim=-3)
             else:
                 fidSum += noise
+                
             
         # Rephasing Spectrum
         if phi0:
