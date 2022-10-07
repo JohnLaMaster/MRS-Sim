@@ -8,15 +8,17 @@ import numpy as np
 import scipy.io as io
 import torch
 import torch.nn as nn
+
 from aux import *
 from baselines import bounded_random_walk
-from interpolate import CubicHermiteMAkima as CubicHermiteInterp  # , batch_linspace
+from interpolate import CubicHermiteMAkima as CubicHermiteInterp
 from numpy import pi
-# from torch.utils import _pair
 from types import SimpleNamespace
 
-__all__ = ['PhysicsModel'] #
+__all__ = ['PhysicsModel']
 
+
+PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
 
 const = torch.FloatTensor([1.0e6]).squeeze()
 zero = torch.FloatTensor([0.0]).squeeze().float()
@@ -30,16 +32,8 @@ def check(x, label):
         a = torch.where(x>const.to(x.device), x, zero.to(x.device))
         a = a.float()
         ind = a.nonzero()
-#         ind = torch.where(x>1.0e6, x, 0.0).float().nonzero()
         print(label,': Value greater than 1e6: ',x[ind])
 
-PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
-
-
-def dict2tensors(dct: dict) -> dict:
-    for key, value in dct.items():
-        if isinstance(value, dict):
-            dict2tensors(value)
 
 @torch.no_grad()
 class PhysicsModel(nn.Module):
@@ -201,6 +195,12 @@ class PhysicsModel(nn.Module):
             if coil_sens:
                 names.append('coil_sens')
                 mult.append(num_coils)
+            if coil_fshift:
+                names.append('coil_fshift')
+                mult.append(num_coils)
+            if coil_phi0:
+                names.append('coil_phi0')
+                mult.append(num_coils)
         for n, m in zip(names, mult): 
             for _ in range(m): header.append(n)
             
@@ -260,6 +260,10 @@ class PhysicsModel(nn.Module):
             ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,num_coil)))
             if coil_sens:
                 ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,num_coil)))
+            if coil_fshift:
+                ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,num_coil)))
+            if coil_phi0:
+                ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,num_coil)))
 
         # # Cummulative
         total = cnt(1)
@@ -275,6 +279,8 @@ class PhysicsModel(nn.Module):
         if num_coil>1: 
             dct.update({'Multi_Coil': torch.empty(1)})
             if coil_sens: dct.update({'Coil_Sens': torch.empty(1)})
+            if coil_fshift: dct.update({'Coil_fShift': torch.empty(1)})
+            if coil_phi0: dct.update({'Coil_Phi0': torch.empty(1)})
         dct.update({'Metabolites': torch.empty(1), 'Parameters': torch.empty(1), 'Overall': torch.empty(1)})
         
         # Combine and define the index for internal use in the model
@@ -402,6 +408,38 @@ class PhysicsModel(nn.Module):
         return complex_exp(identity, (-1*dB0.unsqueeze(-2)).deg2rad()).sum(dim=-3)
 
 
+    def coil_freq_drift(self,
+                        fid: torch.Tensor,
+                        f_shift: torch.Tensor,
+                       ) -> torch.Tensor:
+        if fid.ndim>4:
+            for _ in range(fid.ndim - f_shift.ndim - 4): f_shift = f_shift.unsqueeze(1)
+                # => [bS, [[ON/OFF], [noisy/noiseless]], transients_weights]
+
+        for _ in range(fid.ndim - f_shift.ndim): f_shift = f_shift.unsqueeze(-1)
+            # => [bS, [[ON/OFF], [noisy/noiseless]], transients_weights, channels, spectra]
+
+        t = self.t if t==None else t
+        t = t.t() if t.shape[-1]==1 else t
+        for _ in range(fid.ndim - t.ndim): t = t.unsqueeze(0)
+        
+        return complex_exp(fid, f_shift.mul(t))
+
+
+    def coil_phi0_drift(self,
+                        fid: torch.Tensor,
+                        phi0: torch.Tensor,
+                       ) -> torch.Tensor:
+        if fid.ndim>4:
+            for _ in range(fid.ndim - phi0.ndim - 4): phi0 = phi0.unsqueeze(1)
+                # => [bS, [[ON/OFF], [noisy/noiseless]], transients_phi]
+                
+        for _ in range(fid.ndim - phi0.ndim): phi0 = phi0.unsqueeze(-1)
+            # => [bS, [[ON/OFF], [noisy/noiseless]], transients_phi, channels, spectra]
+            
+        return complex_exp(fid, -1*phi0.deg2rad())
+
+
     def coil_sensitivity(self,
                          fid: torch.Tensor,
                          coil_sens: torch.Tensor,
@@ -409,8 +447,13 @@ class PhysicsModel(nn.Module):
         '''
         Used to apply scaling factors to simulate the effect of coil combination weighting
         '''
-        coil_sens = coil_sens.unsqueeze(1) # Adds the transient dim
+        coil_sens = coil_sens.unsqueeze(1) # Adds the transient dim => [bS, transients, weights]
+        if fid.ndim>4:
+            for _ in range(fid.ndim - coil_sens.ndim - 4): 
+                # => [bS, [[ON/OFF], [noisy/noiseless]], transients, weights]
+                coil_sens = coil_sens.unsqueeze(1)
         for _ in range(fid.ndim - coil_sens.ndim): 
+            # => [bS, [[ON/OFF], [noisy/noiseless]], transients, channels, weights]
             coil_sens = coil_sens.unsqueeze(-1)
         return fid * coil_sens
 
@@ -911,12 +954,14 @@ class PhysicsModel(nn.Module):
                 fshift_i: bool=True,
                 resample: bool=True,
                 baselines: dict=None, 
+                coil_phi0: bool=False,
                 coil_sens: bool=False,
                 magnitude: bool=True,
                 multicoil: bool=False,
                 snr_combo: str=False,
                 zero_fill: int=False,
                 broadening: bool=True,
+                coil_fshift: bool=False,
                 residual_water: dict=None,
                 drop_prob: float=None,
                ) -> torch.Tensor:
@@ -1001,12 +1046,28 @@ class PhysicsModel(nn.Module):
 
                 # Scale with coil senstivities
                 if coil_sens:
+                    # input.shape: [bS, [ON\OFF], [noisy, noiseless], transients, channels, length]
                     assert(multicoil)
                     if gen: print('>>> Coil sensitivity')
                     fidSum = self.coil_sensitivity(fid=fidSum, 
                                                    coil_sens=params[:,self.index['coil_sens']])
                     spectral_fit = self.coil_sensitivity(fid=spectral_fit, 
                                                          coil_sens=params[:,self.index['coil_sens']])
+
+                if coil_fshift:
+                    assert(multicoil)
+                    if gen: print('>>> Coil Frequency Drift')
+                    fidSum = self.coil_freq_drift(fid=fidSum, 
+                                                  coil_fshift=params[:,self.index['coil_fshift']])
+                    spectral_fit = self.coil_freq_drift(fid=spectral_fit, 
+                                                        coil_sens=params[:,self.index['coil_fshift']])
+
+                if coil_phi0:
+                    assert(multicoil)
+                    if gen: print('>>> Coil Phase Drift')
+                    fidSum = self.coil_phi0_drift(fid=fidSum, 
+                                                  coil_phi0=params[:,self.index['coil_phi0']])
+
 
                 if snr_combo=='avg':
                     # Produces more realistic noise profile
