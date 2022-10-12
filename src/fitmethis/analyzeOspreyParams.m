@@ -11,7 +11,7 @@ function dist,parameters = analyzeOspreyParams(path)
 %     - lorentzLB   [Hz]
 %     - freqShift   [Hz]
 %     - refShift    [Hz]
-% =========+=========+=========+=========+=========+=========+=========+=========+
+% 
 params = load(path)
 num_bF = params.header.nMets + params.header.nMM;
 names = {'ampl','lorentzLB','gaussLB','refShift','freqShift','ph0','ph1','SNR'};
