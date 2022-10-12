@@ -37,16 +37,17 @@ end
 
 variable_names = params.header.names;
 for i=1:length(variable_names)
-    dist.(variable_names{i}).ampl.F = fitmethis(parameters(:,i),'dtype','cont',
-                                                'criterion','LL'){1};
+    dist.(variable_names{i}).ampl.F = fitmethis(parameters(:,i),'dtype','cont',...
+                                                'criterion','LL','output','off'){1};
     dist.(variable_names{i}).ampl.min = min(squeeze(parameters(:,i)));
     dist.(variable_names{i}).ampl.max = max(squeeze(parameters(:,i)));
-    dist.(variable_names{i}).d.F = fitmethis(parameters(:,i+num_bF),'dtype','cont',
-                                             'criterion','LL'){1};
+    dist.(variable_names{i}).d.F = fitmethis(parameters(:,i+num_bF),'dtype','cont',...
+                                             'criterion','LL','output','off'){1};
     dist.(variable_names{i}).d.min = min(squeeze(parameters(:,i+num_bF)));
     dist.(variable_names{i}).d.max = max(squeeze(parameters(:,i+num_bF)));
-    dist.(variable_names{i}).fshift.F = fitmethis(parameters(:,i+clen(5)),'dtype',
-                                                  'cont','criterion','LL'){1};
+    dist.(variable_names{i}).fshift.F = fitmethis(parameters(:,i+clen(5)),'dtype',...
+                                                  'cont','criterion','LL','output',...
+                                                  'off'){1};
     dist.(variable_names{i}).fshift.min = min(squeeze(parameters(:,i+clen(5))));
     dist.(variable_names{i}).fshift.max = max(squeeze(parameters(:,i+clen(5))));
     dist.(variable_names{i}).covmat = cov(parameters(:,[i,i+num_bF,i+clen(5)]))
@@ -67,8 +68,8 @@ clen = clen([4,5,7,8,9]);
 ind = ind{[3,4,6,7,8]};
 
 for i=1:length(names)
-    dist.(variable_names{i}) = fitmethis(parameters(:,ind{i}),'dtype','cont',
-                                         'criterion','LL'){1};
+    dist.(variable_names{i}) = fitmethis(parameters(:,ind{i}),'dtype','cont',...
+                                         'criterion','LL','output','off'){1};
     dist.(variable_names{i}).ampl.min = min(squeeze(parameters(:,ind{i})));
     dist.(variable_names{i}).ampl.max = max(squeeze(parameters(:,ind{i})));
 end
