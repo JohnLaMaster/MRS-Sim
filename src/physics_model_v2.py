@@ -122,16 +122,6 @@ class PhysicsModel(nn.Module):
         '''
         
         self._metab, l, self.MM = self.order_metab(metab)
-        if difference_editing: 
-            self._difference_editing, l_diff, mm_diff  = self.order_metab(difference_editing)
-            assert(l==l_diff)
-            assert(self.MM==mm_diff)
-            self.difference_editing_fids = torch.stack([torch.as_tensor(self.basisFcns['metabolites'][m.lower()]['fid'], dtype=torch.float32) for m in self._difference_editing], dim=0).unsqueeze(0)
-            # Resample the basis functions, ppm, and t to the desired resolution
-            self.difference_editing_fids = self.resample_(signal=self.difference_editing_fids,
-                                                          ppm=self._ppm,
-                                                          length=basisFcn_len,
-                                                          target_range=[self._ppm.min(), self._ppm.max()])
         self.MM = self.MM + 1 if  self.MM>-1 else False
         self.lineshape_type = lineshape
 
@@ -164,6 +154,11 @@ class PhysicsModel(nn.Module):
                                              target_range=[self._ppm.min(), self._ppm.max()])
         self._ppm = torch.linspace(self._ppm.min(), self._ppm.max(), basisFcn_len).unsqueeze(0)
         self.t = torch.linspace(self.t.min(), self.t.max(), basisFcn_len).unsqueeze(-1)
+
+        if difference_editing:
+            self.difference_editing_fids = self.syn_basis_fids.clone()
+            ind = [idx for idx, string in enumerate(difference_editing) if string in self._metab]
+            self.difference_editing_fids[ind,...]._fill(0.0)
 
         # Define variables for later
         self.register_buffer('l', torch.FloatTensor([self.syn_basis_fids.shape[-1]]).squeeze())
