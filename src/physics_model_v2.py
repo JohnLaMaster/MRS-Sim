@@ -455,13 +455,23 @@ class PhysicsModel(nn.Module):
 
     def eddyCurrents(self,
                      fid: torch.Tensor,
-                     phase: torch.Tensor,
+                     params: torch.Tensor,
                     ) -> torch.Tensor:
         '''
-        Not fully implemented. Is there a way to manipulate a simulated water fid and then
-        use atan2 to get the phase?
+        Came from Jamie Near's code: 
+            https://github.com/CIC-methods/FID-A/blob/master/processingTools/op_makeECArtifact.m
+        A:  amplitude of EC artifact in time domain [Hz]
+        tc: time constant [s] of the exponentially decaying phase artifact in time domain.
         '''
-        return complex_exp(fid, -1*phase.unsqueeze(-1).deg2rad()*self.t)
+        t = self.t.t if self.t.shape[0]!=1 else self.t # [1x8192]
+        A, tc = params[:,0].unsqueeze(-1), params[:,1].unsqueeze(-1)
+        for _ in range(fid.ndim - 2):
+            t  = t.unsqueeze(0)
+            A  = A.unsqueeze(-1)
+            tc = tc.unsqueeze(-1)
+        f_mod = A * complex_exp(torch.ones_like(fid), -t / tc, real=True)
+
+        return complex_exp(fid, -1*f_mod*t*2*PI)
 
 
     def firstOrderPhase(self, 
@@ -1109,7 +1119,7 @@ class PhysicsModel(nn.Module):
 
         # Eddy Currents
         if eddy:
-            fidSum = self.eddyCurrents(fid=fidSum, phase=params[:,self.index['ecc']])
+            fidSum = self.eddyCurrents(fid=fidSum, params=params[:,self.index['ecc']])
 
         # Apodize
         if apodize:
