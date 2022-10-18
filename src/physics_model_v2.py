@@ -140,20 +140,27 @@ class PhysicsModel(nn.Module):
         self.cropRange = cropRange if cropRange else [self._ppm.min(), self._ppm.max()]
         self.t = self.t.unsqueeze(-1).float()
         self._basis_metab = []
-        if not isinstance(spectralidth, type(None)):
-            self.spectralwidth = spectralwidth
 
         dct = OrderedDict()
         for m in self._metab: dct.update({str(m): torch.empty(1)})  # Add metabolite names to dictionary
         # \todo Add a check to make sure the specified metabolites are in the basis set
         self.syn_basis_fids = torch.stack([torch.as_tensor(self.basisFcns['metabolites'][m.lower()]['fid'], dtype=torch.float32) for m in self._metab], dim=0).unsqueeze(0)
+        if not isinstance(spectralidth, type(None)):
+            self.spectralwidth = spectralwidth
+            target_range = [-spectralwidth/2, spectralwidth/2] / self.carrier_frequency
+            t = 1 / spectralwidth * basisFcn_len
+        else:
+            target_range = [self._ppm.min(), self._ppm.max()]
+            t = self.t.max()
+
         # Resample the basis functions, ppm, and t to the desired resolution
-        self.syn_basis_fids = self.resample_(signal=self.syn_basis_fids,
+        self.syn_basis_fids = self.resample_(signal=Fourier_Transform(self.syn_basis_fids),
                                              ppm=self._ppm,
                                              length=basisFcn_len,
-                                             target_range=[self._ppm.min(), self._ppm.max()])
-        self._ppm = torch.linspace(self._ppm.min(), self._ppm.max(), basisFcn_len).unsqueeze(0)
-        self.t = torch.linspace(self.t.min(), self.t.max(), basisFcn_len).unsqueeze(-1)
+                                             target_range=target_range)
+        self.syn_basis_fids = inv_Fourier_Transform(self.syn_basis_fids)
+        self._ppm = torch.linspace(target_range[0], target_range[1], basisFcn_len).unsqueeze(0)
+        self.t = torch.linspace(0, t, basisFcn_len).unsqueeze(-1)
 
         if difference_editing:
             self.difference_editing_fids = self.syn_basis_fids.clone()
