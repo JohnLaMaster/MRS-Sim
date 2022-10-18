@@ -147,7 +147,7 @@ class PhysicsModel(nn.Module):
         self.syn_basis_fids = torch.stack([torch.as_tensor(self.basisFcns['metabolites'][m.lower()]['fid'], dtype=torch.float32) for m in self._metab], dim=0).unsqueeze(0)
         if not isinstance(spectralidth, type(None)):
             self.spectralwidth = spectralwidth
-            target_range = [-spectralwidth/2, spectralwidth/2] / self.carrier_frequency
+            target_range = 0.5 * [-spectralwidth, spectralwidth] / self.carrier_frequency
             t = 1 / spectralwidth * basisFcn_len
         else:
             target_range = [self._ppm.min(), self._ppm.max()]
