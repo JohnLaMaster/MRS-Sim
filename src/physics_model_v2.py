@@ -99,9 +99,13 @@ class PhysicsModel(nn.Module):
     def initialize(self, 
                    metab: list=['Cho','Cre','Naa','Glx','Ins','Mac','Lip'],
                    basisFcn_len: float=1024,
+                   b0: bool=False,
+                   coil_fshift: bool=False,
+                   coil_phi0: bool=False,
                    coil_sens: bool=False,
                    cropRange: list=[0,5],
                    difference_editing: list=False, # should be a list of basis function names that gets subtracted
+                   eddycurrents: bool=False,
                    fshift_i: bool=False,
                    image_resolution: list=[0.5, 0.5, 0.5],
                    length: float=512,
@@ -185,14 +189,23 @@ class PhysicsModel(nn.Module):
         num_bF = l+self.MM if self.MM else l
         header, cnt = self._metab, counter(start=int(3*num_bF)-1)
         g = 1 if not self.MM else 2
-        names = ['d',   'dmm', 'g',   'gmm', 'fshift', 'snr', 'phi0', 'phi1', 'b0', 'bO_dir']
-        mult  = [  l, self.MM,   l, self.MM,        1,     1,      1,      1,    1,        3] 
+        names = ['d',   'dmm', 'g',   'gmm', 'fshift', 'snr', 'phi0', 'phi1']
+        mult  = [  l, self.MM,   l, self.MM,        1,     1,      1,      1] 
         if fshift_i: # Should be a global fshift then individual metabolites and MM/Lip fsfhitfs
-            names.insert(-6,'fshiftmet')
-            names.insert(-6,'fshiftmm')
-            mult.insert(-6,l), mult.insert(-6,self.MM)
+            names.insert(-4,'fshiftmet')
+            names.insert(-4,'fshiftmm')
+            mult.insert(-4,l), mult.insert(-6,self.MM)
+        if b0:
+            names.insert(-1,'b0')
+            names.insert(-1,'bO_dir')
+            mult.insert(-1,1), mult.insert(-1,3)
+        if eddycurrents:
+            names.insert(-1,'eddyCurrents_A')
+            mult.insert(-1,1)
+            names.insert(-1,'eddyCurrents_tc')
+            mult.insert(-1,1)
         if num_coils>1: # Minimum 2 num_coils for the variables to be included in the model
-            names.append('multi_coil')
+            names.append('coil_snr')
             mult.append(num_coils)
             if coil_sens:
                 names.append('coil_sens')
@@ -254,8 +267,12 @@ class PhysicsModel(nn.Module):
         ind.append(cnt(1)) # Phi1
 
         # # B0 inhomogeneities
-        ind.append(cnt(1)) # B0 - mean
-        ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,3))) # directional deltas
+        if b0:
+            ind.append(cnt(1)) # B0 - mean
+            ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,3))) # directional deltas
+
+        if eddycurrents:
+            ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,2)))
 
         # # Coil sensitivities
         if num_coil>1:
@@ -276,10 +293,11 @@ class PhysicsModel(nn.Module):
         # Define the remaining dictionary keys
         dct.update({'D': torch.empty(1), 'G': torch.empty(1), 'F_Shift': torch.empty(1)})
         if fshift_i: dct.update({'F_Shifts': torch.empty(1)})
-        dct.update({'SNR': torch.empty(1), 'Phi0': torch.empty(1), 'Phi1': torch.empty(1), 'B0': torch.empty(1), 
-                    'B0_dir': torch.empty(1)})
+        dct.update({'SNR': torch.empty(1), 'Phi0': torch.empty(1), 'Phi1': torch.empty(1)})
+        if b0: dct.update({'B0': torch.empty(1), 'B0_dir': torch.empty(1)})
+        if eddycurrents: dct.update({'ECC': torch.empty(1)})
         if num_coil>1: 
-            dct.update({'Multi_Coil': torch.empty(1)})
+            dct.update({'Coil_SNR': torch.empty(1)})
             if coil_sens: dct.update({'Coil_Sens': torch.empty(1)})
             if coil_fshift: dct.update({'Coil_fShift': torch.empty(1)})
             if coil_phi0: dct.update({'Coil_Phi0': torch.empty(1)})
@@ -725,60 +743,31 @@ class PhysicsModel(nn.Module):
 
     
     def quantify_metab(self, 
-                       params: torch.Tensor, 
-                       norm: torch.Tensor=None,
+                       fid: torch.Tensor, 
                        wrt_metab: str='cr',
-                       b0: bool=False,
                       ) -> dict:
         '''
         Both peak height and peak area are returned for each basis line. The basis fids are first 
         modulated and then broadened. The recovered spectra are normalized and then multiplied by
         the normalizing values from the original spectra.
         '''
-        if params.ndim==3: params = params.squeeze(-1)
-        assert(params.ndim==2)
-        wrt_metab = wrt_metab.lower()
+        wrt_metab = wrt_metab.split(',')
+        ind = tuple([self.index[m.lower()] for m in wrt_metab])
         
-        # Quantify parameters
-        params = self.quantify_params(params, label='quantify_metab')
-
-        if b0:
-            B0 = self.B0_inhomogeneities(b0=params[:,self.index['b0']],
-                                         param=params[:,self.index['b0_dir']])
-
-        # Define basis spectra coefficients
-        fid = params[:,self.index['metabolites']].unsqueeze(2).unsqueeze(-1) #* self.syn_basis_fids
-        fid = torch.cat([fid.mul(self.syn_basis_fids[:,:,0,:].unsqueeze(2)),
-                         fid.mul(self.syn_basis_fids[:,:,1,:].unsqueeze(2))], dim=2).contiguous()
-        check(fid, 'quantify_metab basis line modulation')
-
-#         Line broadening **if included in model**
-        if params.shape[1]>len(self.index['metabolites']):
-            fid = self.lineshape_correction(fid, params[:,self.index['d']],
-                                            params[:,self.index['g']])
-
-        if b0: fid *= B0
-        
-        # Recover and normalize the basis lines
-        specs = self.magnitude(Fourier_Transform(fid), normalize=True)
-        
-        # Scale the lines to the magnitude of the input spectra
-        if norm: spec = spec.mul(norm)
-
-        # # Combine related metabolite lines
-        # specs = spec[:,tuple(self.totals[0]),0,:].sum(dim=1, keepdim=True).unsqueeze(-2)
-        # for ind in range(1, len(self.totals)):
-        #     specs = torch.cat([specs, spec[:,tuple(self.totals[ind]),0,:].sum(dim=1, keepdim=True).unsqueeze(-2)], dim=1)
-
         # Quantities
+        specs = Fourier_Transform(fid)
         area = torch.stack([torch.trapz(specs[:,i,:], self.ppm, dim=-1).unsqueeze(-1) for i in range(specs.shape[1])], dim=1)
         height = torch.max(specs, dim=-1, keepdims=True).values
+        ind = tuple([self.index[m] for m in wrt_metab])
+
+        area_denom = area[:,ind,::].sum(dim=1,keepdims=True)
+        height_denom = height[:,ind,::].sum(dim=1,keepdims=True)
         
         # Normalize to creatine (CRE)
-        rel_area = area.div(area[:,self.index[wrt_metab],::].unsqueeze(1))
-        rel_height = height.div(height[:,self.index[wrt_metab],::].unsqueeze(1))
+        rel_area = area.div(area_denom)
+        rel_height = height.div(height_denom)
 
-        return {'area': area.squeeze(-1), 'height': height.squeeze(-1), 'rel_area': rel_area.squeeze(-1), 'rel_height': rel_height.squeeze(-1), 'params': params}
+        return {'area': area.squeeze(-1), 'height': height.squeeze(-1), 'rel_area': rel_area.squeeze(-1), 'rel_height': rel_height.squeeze(-1), 'wrt': wrt_metab}
 
 
     def resample_(self, 
@@ -971,6 +960,7 @@ class PhysicsModel(nn.Module):
                 magnitude: bool=True,
                 multicoil: bool=False,
                 snr_combo: str=False,
+                wrt_metab: str='cr',
                 zero_fill: int=False,
                 broadening: bool=True,
                 coil_fshift: bool=False,
@@ -1127,10 +1117,12 @@ class PhysicsModel(nn.Module):
         # Eddy Currents
         if eddy:
             fidSum = self.eddyCurrents(fid=fidSum, params=params[:,self.index['ecc']])
+            fid = self.eddyCurrents(fid=fid, params=params[:,self.index['ecc']])
 
         # Apodize
         if apodize:
             fidSum = self.apodization(fid=fidSum, hz=apodize)
+            fid = self.apodization(fid=fid, hz=apodize)
 
         # Zero-filling
         if zero_fill:
@@ -1176,7 +1168,7 @@ class PhysicsModel(nn.Module):
             
             
         print('>>>>> Compiling spectra')
-        return self.compile_outputs(specSummed, spectral_fit, offset, params, denom, b0)
+        return self.compile_outputs(specSummed, spectral_fit, offset, params, denom, self.quantify_metab(fid, wrt_metab))
 
     def compile_outputs(self, 
                         specSummed: torch.Tensor, 
@@ -1184,7 +1176,7 @@ class PhysicsModel(nn.Module):
                         offsets: dict,
                         params: torch.Tensor, 
                         denom: torch.Tensor,
-                        b0: bool,
+                        quantities: dict,
                        ) -> torch.Tensor:
         if offsets:
             if not isinstance(offsets['baselines'], type(None)):
@@ -1200,7 +1192,6 @@ class PhysicsModel(nn.Module):
         except Exception: baselines = None
         try: residual_water = offsets['residual_water']
         except Exception: residual_water = None
-        quantities = torch2numpy(self.quantify_metab(params, b0=b0))
 
         return specSummed.numpy(), spectral_fit.numpy(), baselines, \
-               residual_water, params.numpy(), quantities
+               residual_water, params.numpy(), torch2numpy(quantities)
