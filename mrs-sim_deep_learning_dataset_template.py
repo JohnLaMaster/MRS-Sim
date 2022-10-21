@@ -7,7 +7,7 @@ import numpy as np
 import scipy.io as io
 import torch
 
-from aux import concat_dict, sort_parameters, torch2numpy
+from aux import concat_dict, normalize, sort_parameters, torch2numpy
 from pm_v2 import PhysicsModel
 from types import SimpleNamespace
 
@@ -15,8 +15,7 @@ from types import SimpleNamespace
 sys.path.append('../')
 
 
-
-def simulate(config_file, args=None):
+def prepare(sonfig_file):
     # Load the config file
     with open(config_file) as file:
         config = json.load(file)
@@ -33,21 +32,29 @@ def simulate(config_file, args=None):
     # Define and initialize the physics model
     pm = PhysicsModel(PM_basis_set=config.PM_basis_set)
     pm.initialize(metab=config.metabolites, 
+                  basisFcn_len=config.basis_fcn_length,
+                  b0=config.b0,
+                  coil_fshift=config.coil_fshift,
+                  coil_phi0=config.coil_phi0,
+                  coil_sens=config.coil_sens,
                   cropRange=config.cropRange,
-                  length=config.spectrum_length,
-                  ppm_ref=config.ppm_ref,
-                  num_coils=config.num_coils,
-                  spectral_resolution=config.spectral_resolution,
+                  difference_editing=False,
+                  eddycurrents=config.eddy,
+                  fshift_i=config.fshift_i,
                   image_resolution=config.image_resolution,
+                  length=config.spectrum_length,
                   lineshape=config.lineshape,
-                  spectralwidth=config.spectralwidth,
-                  basisFcn_len=config.basis_fcn_length)
+                  num_coils=config.num_coils,
+                  ppm_ref=config.ppm_ref,
+                  spectral_resolution=config.spectral_resolution,
+                  spectralwidth=config.spectralwidth)
 
     if parameters: pm.set_parameter_constraints(parameters)
     ind = pm.index
     l = len(ind['metabolites'])
 
     
+    print('>>> Metabolite Quantities')
     for k, v in ind.items():
         if isinstance(v, tuple):
             ind[k] = list(ind[k])
@@ -59,43 +66,63 @@ def simulate(config_file, args=None):
     ind['mac'] = tuple([v for k, v in ind.items() if 'mm' in k]) 
     ind['lip'] = tuple([v for k, v in ind.items() if 'lip' in k]) 
 
+    return config, resWater_cfg, baseline_cfg, pm, l, ind, p, totalEntries    
+
+
+
+def sample(config, resWater_cfg, baseline_cfg, pm, l, ind, p, totalEntries):
     # Sample parameters
-    params = torch.zeros((totalEntries, ind['overall'][-1]+1)).uniform_(0,1+1e-6)
-    params = params.clamp(0,1)
-    # Adding eps and then clamping converts the range from [0,1) to [0,1].
+    params = torch.zeros((totalEntries, ind['overall'][-1]+1)).uniform_(0,1)
+    params = normalize(params, dims=-1) 
+    # normalize converts the range from [0,1) to [0,1].
+
 
     # Quantify parameters
     params = pm.quantify_params(params)
     
-    
     '''
     This next section of code will need to be customized for your own implementations.
     '''
+
     # All metabolite values are ratios wrt creatine. Therefore, Cr is always 1.0
     params[:,ind['cr']].fill_(1.0)
-    
-    if config.use_covmat:
-        '''
-        If you want to use a covariance matrix for sampling metabolite amplitudes, this is where covmat and loc 
-        should be defined. 
-        Use the ind variable to move the sampled parameters to the correct indices. The exact implementation will
-        depend on the variables and order of variables that are included in your covariance matrix.
-        '''
-        _, mtb_ind = pm.basis_metab
-        # print('mtb_ind: ',mtb_ind)
-        covmat = torch.as_tensor(config.covmat['matrix']) # 2D matrix
-        loc = torch.as_tensor(config.covmat['loc']) # 1D matrix
-        mets = torch.distributions.multivariate_normal.MultivariateNormal(loc=loc, covariance_matrix=covmat)
-        start, stop = mtb_ind[0], mtb_ind[-1]
-        temp = mets.sample([params.shape[0]])        
-        params[:,start:stop+1] = torch.cat(temp[...,0], torch.ones_like(temp[...,0]), temp[...,:-1], dim=-1)
+    if 'pcr' in config.metabolites:
+        params[:,ind['cr']].fill_(0.5)
+        params[:,ind['pcr']].fill_(0.5)
+
+    '''
+    If you want to use a covariance matrix for sampling metabolite amplitudes, this is where covmat and loc 
+    should be defined. 
+    Use the ind variable to move the sampled parameters to the correct indices. The exact implementation will
+    depend on the variables and order of variables that are included in your covariance matrix.
+    '''
+    # if config.use_covmat:
+    #     # _, mtb_ind = pm.basis_metab
+    #     # print('mtb_ind: ',mtb_ind)
+    #     # covmat = torch.as_tensor(config.covmat) # 2D matrix
+    #     # loc = torch.as_tensor(config.loc) # 1D matrix
+    #     # mets = torch.distributions.multivariate_normal.MultivariateNormal(loc=loc,
+    #     #                                                                   covariance_matrix=covmat)
+    #     # start, stop = mtb_ind[0], mtb_ind[-1]
+    #     # params[:,start:stop+1] = mets.rsample([params.shape[0]])
+    #     _, mtb_ind = pm.basis_metab
+    #     print('mtb_ind: ',mtb_ind)
+    #     covmat = torch.as_tensor(config.covmat) # 2D matrix
+    #     loc = torch.as_tensor(config.loc) # 1D matrix
+    #     mets = torch.distributions.multivariate_normal.MultivariateNormal(loc=loc,
+    #                                                                       covariance_matrix=covmat)
+    #     start, stop = mtb_ind[0], mtb_ind[-1]
+    #     temp = mets.rsample([params.shape[0]])        
+    #     params[:,start:stop+1] = torch.cat(temp[...,0], torch.ones_like(temp[...,0]), temp[...,-1], dim=-1)
+    # print(params.shape)
 
     '''
     The next section of code is used to drop some parameters from each spectrum for deep learning applications.
     Should you want to use different distributions for some of the parameters, the following can be used as a 
     guide. Defining different distributions can be done before OR after quantifying the parameters.
     '''
-    print('>>> Metabolite Quantities & Lineshape Profiles')
+    
+    print('>>> Line Broadening')
     keys, g = ind.keys(), 0
     for k in keys: g += 1 if 'mm' in k else 0
     for k in keys: g += 1 if 'lip' in k else 0
@@ -198,7 +225,7 @@ def simulate(config_file, args=None):
 
     if config.num_coils>1:
         # drop_prob does not affect these parameters
-        print('>>> Multiple Coils')
+        print('>>> Transients')
         params[:,ind['multi_coil']] = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['multi_coil']].shape)
         # Values are sampled from a Gaussian mu=1, min/max=0/2
         # The linear SNR is calculated and scaled based on the number of transients
@@ -206,6 +233,12 @@ def simulate(config_file, args=None):
         if config.coil_sens:
             print('>>> Coil Sensitivities')
             params[:,ind['coil_sens']] = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_sens']].shape)
+        if config.coil_fshift:
+            print('>>> Coil Frequency Drift')
+            params[:,ind['coil_fshift']] = torch.distributions.normal.Normal(0,0.25).sample(params[:,ind['coil_fshift']].shape) + params[:,ind['coil_fshift']][0]
+        if config.coil_phi0:
+            print('>>> Coil Phase Drift')
+            params[:,ind['coil_phi0']] = torch.distributions.normal.Normal(0,0.25).sample(params[:,ind['coil_phi0']].shape) + params[:,ind['coil_phi0']][0]
 
 
     '''
@@ -223,9 +256,11 @@ def simulate(config_file, args=None):
     if not config.noise: params[:,ind['snr']].fill_(0.0)
     if not config.phi0: params[:,ind['phi0']].fill_(0.0)
     if not config.phi1: params[:,ind['phi1']].fill_(0.0)
-    # Transients are dealth with above
+    # Multi_coil is dealt with above
+
+    return config, resWater_cfg, baseline_cfg, pm, l, ind, p, totalEntries, params
     
-            
+def simulate(config, resWater_cfg, baseline_cfg, pm, l, ind, p, totalEntries, params, args=None):
     '''
     Begin simulating and saving the spectra
     '''
@@ -262,7 +297,7 @@ def simulate(config_file, args=None):
                              coil_fshift=config.coil_fshift,
                              residual_water=sample_resWater(n-i, **resWater_cfg) if resWater_cfg else False,
                              drop_prob=config.drop_prob)
-        ppm = pm.get_ppm(cropped=False).numpy()
+        ppm = pm.ppm.numpy()
 
         if first:
             spectra, fit, baseline, reswater, parameters, quantities = outputs
@@ -319,21 +354,18 @@ def _save(path, spectra, fits, baselines, reswater, parameters, quantities, crop
     print(path + '.mat')
 
 
-
-
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--savedir', type=str, default='./dataset/')
     parser.add_argument('--batchSize', type=int, default=10000)
     parser.add_argument('--config_file', type=str, default='./src/configurations/debug_new_init.json')#DL_PRESS_144_ge.json')
-    parser.add_argument('--PM_basis_set', type=str, default='fitting_basis_ge_press144_1.mat', help='file name of the basis set')
-    parser.add_argument('--simple', action='store_true', default=False, help='Use ISMRM basis functions and a simplfied physics model')
 
     args = parser.parse_args()
 
     # torch.distributed.init_process_group(backend='gloo', world_size=4)
     
     os.makedirs(args.savedir, exist_ok=True)
-   
 
-    simulate(config_file=args.config_file, args=args)
+    # Simulate
+    simulate(sample(prepare(config_file)),args=args)
+   
