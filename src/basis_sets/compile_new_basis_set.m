@@ -8,14 +8,14 @@ edit_off_paths = {}; % {'path/lactate.mat','path/gaba.mat'};
 metabs_off = {}; % {'lac','gaba'};
 
 %%% Automated storage of metabolites and basis functions
-load template metabolites header artifacts
+load(template, 'metabolites','header','artifacts')
 fileinfo = dir(new_path);
 fnames = {fileinfo.name};
-dir = struct2cell(fileinfo); dir = char(dir(2,1));
+directory = struct2cell(fileinfo); directory = char(directory(2,1));
 first = -1;
 
 for i=1:length(fnames)
-    pth = fullfile(dir,fnames{i});
+    pth = fullfile(directory,fnames{i});
     load(pth,'exptDat')
     if first==-1
         dt = 1/exptDat.sw_h; 
@@ -26,18 +26,19 @@ for i=1:length(fnames)
         header.t = 0:dt:(dt*(header.Ns-1)); 
         header.centerFreq = centerFreq;
         header.B0 = B0;
-        header.ppm = (-.5*sw:sw/(length(header.t-1):0.5*sw) + centerFreq;
+        header.ppm = (-.5*sw:sw/(length(header.t)-1):0.5*sw) + centerFreq;
+%         header.ppm = header.ppm + centerFreq;
         first = 1;
     end
     [a, metab,b] = fileparts(pth);
     metab = lower(metab);
-    metabolites.(metab).fid = [real(exptDat.exptDat.fid'); imag(exptDat.exptDat.fid')];
+    metabolites.(metab).fid = [real(exptDat.fid'); imag(exptDat.fid')];
 end
 
 %%% If spectral editing or othe unique basis functions need to be stored
 %%% with their original FIDs, that should be added here.
 if ~isempty(edit_off_paths)
-    for i=1:length(edit_off_paths}
+    for i=1:length(edit_off_paths)
         load(pth,'exptDat')
         [a, metab,b] = fileparts(pth);
         metab = lower(metab);
