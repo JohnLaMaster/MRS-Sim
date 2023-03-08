@@ -1,22 +1,31 @@
 import torch
 import torch.nn.functional as F
-from src.aux import torch_batch_linspace
+from aux import batch_linspace
+
 
 __all__ = ['bounded_random_walk']
 
 
 def bounded_random_walk(start: torch.Tensor, 
                         end: torch.Tensor, 
-                        std: float=0.1, 
+                        std: (float,torch.Tensor)=0.1, 
                         lower_bound: float=-1, 
                         upper_bound: float=1,
                         length: int=512):
     '''
-    The dimensions of start and end should match the dimensions of the desired number of unique baselines.
-    It is recommended to smooth the baselines before adding to the spectra.
+    Code modified from: 
+    https://stackoverflow.com/questions/46954510/random-walk-series-between-start-end-values-and-within-minimum-maximum-limits
+    The dimensions of start and end should match the dimensions of the 
+    desired number of unique baselines. It is recommended to smooth the 
+    baselines before adding to the spectra.
     '''
     size = list([d for d in start.shape])
     size[-1] = length
+
+    if isinstance(std, float):
+        std = torch.as_tensor(std)
+    if isinstance(std, torch.Tensor): 
+        for _ in range(start.ndim - std.ndim): std = std.unsqueeze(-1)
     
     assert ((lower_bound <= start).all() and (lower_bound <= end).all())
     assert ((start <= upper_bound).all() and (end <= upper_bound).all())
@@ -24,13 +33,15 @@ def bounded_random_walk(start: torch.Tensor,
     bounds = upper_bound - lower_bound
 
     rand = (std * (torch.rand(tuple(size)) - 0.5)).cumsum(-1)
-    rand_trend = torch_batch_linspace(rand[..., 0].unsqueeze(-1), rand[...,-1].unsqueeze(-1), length)
+    rand_trend = batch_linspace(rand[..., 0].unsqueeze(-1), 
+                                rand[...,-1].unsqueeze(-1), length)
     rand_deltas = (rand - rand_trend)
-    rand_deltas /= torch.clamp(torch.max((rand_deltas.max(-1).values - rand_deltas.min(-1).values) / bounds,
-                                        dim=-1, keepdims=True).values,
-                               min=1, max=None).unsqueeze(-1)
-
-    trend_lines = torch_batch_linspace(start, end, length)
+    rand_deltas /= torch.clamp(torch.max((rand_deltas.amax(-1) - \
+                                          rand_deltas.amin(-1)).unsqueeze(-1) / bounds, 
+                                         dim=-1, keepdims=True).values,
+                               min=1, max=None)
+    
+    trend_lines = batch_linspace(start, end, length)
     upper_bound_delta = upper_bound - trend_lines 
     lower_bound_delta = lower_bound - trend_lines 
 
