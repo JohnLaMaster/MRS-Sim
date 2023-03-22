@@ -1,0 +1,5 @@
+March 22, 2023
+- Allow basis set simulations within the framework
+- Can import MARSS using a matlab engine in python
+- Could streamline simulation pipeline
+*Note: Would allow for including T1/T2 relaxation
