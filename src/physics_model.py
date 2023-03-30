@@ -40,6 +40,7 @@ class PhysicsModel(nn.Module):
                 elif str(key)=='artifacts': 
                     self.basisFcns['artifacts'] = value
                 elif str(key)=='header':
+                    self.basisFcns['header'] = value
                     for k, v in dct[key].items():
                         if str(k)=='ppm': 
                             k, v = '_ppm', torch.flip(v.unsqueeze(0), 
@@ -62,6 +63,10 @@ class PhysicsModel(nn.Module):
             if not ('mm' in k.lower() or 'lip' in k.lower()):
                 metab_list.append(k)
         return metab_list, temp[0:len(metab_list)]
+    
+    @property
+    def header(self):
+        return self.basisFcns['header']
     
     @property
     def index(self):
