@@ -46,6 +46,7 @@ def prepare(config_file):
                   ppm_ref=config.ppm_ref,
                   spectral_resolution=config.spectral_resolution,
                   spectralwidth=config.spectralwidth)
+    config.header = pm.header
 
     # print(pm.index)
     if parameters: pm.set_parameter_constraints(parameters)
@@ -76,7 +77,8 @@ def _save(path: str,
           parameters: np.ndarray, 
           quantities: dict, 
           cropRange: list, 
-          ppm: np.ndarray):
+          ppm: np.ndarray,
+          header: dict):
     print('>>> Saving Spectra')
     base, _ = os.path.split(path)
     os.makedirs(base, exist_ok=True)
@@ -89,6 +91,7 @@ def _save(path: str,
              'quantities': quantities,
              'cropRange': cropRange,
              'ppm': ppm,
+             'header': header
             }
     io_savemat(path + '.mat', do_compression=True, mdict=mdict)
     print(path + '.mat')
@@ -154,7 +157,8 @@ def simulate(inputs, args=None):
                   parameters=sort_parameters(parameters, ind), 
                   quantities=quantities, 
                   cropRange=pm.cropRange, 
-                  ppm=ppm)
+                  ppm=ppm,
+                  header=config.header)
             first = True
             counter += 1
             print('>>> ** {} ** <<<'.format(counter))
@@ -167,5 +171,6 @@ def simulate(inputs, args=None):
                   parameters=sort_parameters(parameters, ind), 
                   quantities=quantities, 
                   cropRange=pm.cropRange, 
-                  ppm=ppm)
+                  ppm=ppm,
+                  header=config.header)
         del spectra, fit, baseline, reswater, parameters, quantities
