@@ -11,20 +11,20 @@ def main(cfg_path: str):
         config = json.load(file)
 
     # Load configuration parameters
-    seq = config["pulse_sequence"]
-    vendor = config["vendor"]
-    te = config["TE"]
+    seq = config['pulse_sequence']
+    vendor = config['vendor']
+    te = config['TE']
 
     # Load template file
-    template_data = io.loadmat(config["template_path"])
+    template_data = io.loadmat(config['template_path'])
     metabolites = template_data['metabolites']
     header = template_data['header']
     artifacts = template_data['artifacts']
 
     # Loop over files in the new_path directory
-    for i, filename in enumerate(os.listdir(config["new_path"])):
-        if filename.endswith(".mat"):
-            filepath = os.path.join(config["new_path"], filename)
+    for i, filename in enumerate(os.listdir(config['new_path'])):
+        if filename.endswith('.mat'):
+            filepath = os.path.join(config['new_path'], filename)
             exptDat = io.loadmat(filepath)['exptDat']#[0][0]
             if i == 0:
                 sw = exptDat['sw_h']
@@ -33,10 +33,13 @@ def main(cfg_path: str):
                 header['carrier_frequency'] = exptDat['sf']
                 header['Ns'] = exptDat['nspecC']
                 header['t'] = np.arange(0, dt * header['Ns'], dt)
-                header['centerFreq'] = config["centerFreq"]
-                header['B0'] = config["B0"]
+                header['centerFreq'] = config['centerFreq']
+                header['B0'] = config['B0']
+                header['TE'] = te
+                header['pulse_sequence'] = seq
+                header['vendor'] = vendor
                 header['ppm'] = (-0.5 * sw + np.arange(0, header['Ns']) * \
-                                    sw / (header['Ns'] - 1)) + config["centerFreq"]
+                                    sw / (header['Ns'] - 1)) + config['centerFreq']
             a, metab, b = os.path.split(filepath)
             metab = metab.lower()
             metabolites[metab]['fid'] = np.stack([np.squeeze(exptDat['fid'].real), 
@@ -44,9 +47,9 @@ def main(cfg_path: str):
                                                  axis=0)
 
     # Store edited spectra if needed
-    if config["edit_off_path"]:
-        for met in config["metabs_off"]:
-            filepath = os.path.join(config["edit_off_path"], met + '.mat')
+    if config['edit_off_path']:
+        for met in config['metabs_off']:
+            filepath = os.path.join(config['edit_off_path'], met + '.mat')
             exptDat = io.loadmat(filepath)['exptDat']#[0][0]
             a, metab, b = os.path.split(filepath)
             metab = metab.lower()
@@ -60,7 +63,7 @@ def main(cfg_path: str):
     else:
         save_name = config['save_name']
 
-    path, _, _ = os.path.split(config["template_path"])
+    path, _, _ = os.path.split(config['template_path'])
     save_path = os.path.join(path, save_name)
     io.savemat(save_path, mdict={'metabolites': metabolites, 'header': header, 'artifacts': artifacts})
     print('Saved the {} basis set at: {}'.format(save_name,path))
