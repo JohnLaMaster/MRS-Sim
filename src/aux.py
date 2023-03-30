@@ -8,16 +8,15 @@ import scipy.io as io
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+# from pm_v3 import PhysicsModel
 from torch.fft import fft, fftshift, ifft, ifftshift, irfft, rfft
 from types import SimpleNamespace
-
 
 __all__ = ['batch_linspace', 'batch_smooth', 'complex_exp', 'concat_dict', 
            'convertdict', 'counter', 'dict2tensors', 'Fourier_Transform', 
            'HilbertTransform', 'inv_Fourier_Transform', 'normalize', 
            'OrderOfMagnitude', 'rand_omit', 'sample_baselines', 
-           'sample_resWater', '_save', 'sort_parameters', 'torch2numpy', 
-           'unwrap']
+           'sample_resWater', 'sort_parameters', 'torch2numpy', 'unwrap']
 
 
 PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
@@ -95,9 +94,9 @@ def complex_exp(signal: torch.Tensor,
         return torch.cat([real, imag], dim=-2).mul(
                     torch.exp(theta[...,0,:].unsqueeze(-2)))
     
-    real = signal[...,0,:].mul(torch.cos(theta[...,1,:])) - 
+    real = signal[...,0,:].mul(torch.cos(theta[...,1,:])) - \
             signal[...,1,:].mul(torch.sin(theta[...,1,:]))
-    imag = signal[...,0,:].mul(torch.sin(theta[...,1,:])) + 
+    imag = signal[...,0,:].mul(torch.sin(theta[...,1,:])) + \
             signal[...,1,:].mul(torch.cos(theta[...,1,:]))
 
     return torch.cat([real.unsqueeze(-2), imag.unsqueeze(-2)], dim=-2)
@@ -221,7 +220,7 @@ def inv_Fourier_Transform(signal: torch.Tensor,
 
 
 def normalize(tensor: torch.Tensor, dims=list) -> torch.Tensor:
-    denom = torch.max(tensor, dim=dims, keepdims=True).values - 
+    denom = torch.max(tensor, dim=dims, keepdims=True).values - \
                 torch.min(tensor, dim=dims, keepdims=True).values
     return (tensor - torch.min(tensor.abs(), dim=dims, 
                                 keepdims=True).values) / denom
@@ -280,6 +279,17 @@ def rand_omit(data: torch.Tensor, value: float=0., p: float=0.2):
     return data, sign
 
 
+def load_parameters(path: str, prepare: tuple):
+    assert os.path.isfile(path)
+    with open(path,'rb') as file:
+        params = io.loadmat(file, variable_names='params')['params']
+
+    out = list(prepare)
+    out = out.append(params)
+
+    return out
+
+
 def smooth(x: torch.Tensor,
            window_len: float=0.1,
            window: str='flat') -> torch.Tensor:
@@ -289,7 +299,6 @@ def smooth(x: torch.Tensor,
     w /= w.sum()
     out = F.conv1d(input=F.pad(x, (w_len, w_len), mode='reflect'), weight=w)
     out = out[...,w_len//2:-w_len//2-1]
-    # print(x.shape, out.shape)
     assert(x.shape==out.shape)
     return out
 
@@ -314,30 +323,6 @@ def sample_resWater(N: int, **cfg):
 
         return dct
     return None
-
-
-def _save(path: str, 
-          spectra: torch.Tensor, 
-          parameters: dict, 
-          ppm_range: torch.Tensor, 
-          baselines: torch.Tensor=None, 
-          residual_water: torch.Tensor=None, 
-          spectral_fit: torch.Tensor=None, 
-          quantities: dict=None):
-    print('>>> Saving Spectra')
-    base, _ = os.path.split(path)
-    os.makedirs(base, exist_ok=True)
-    num_test = 0
-    dict = {'spectra': spectra.numpy(),
-            'params': parameters,
-            'ppm_range': ppm_range,
-            'baselines': bl.numpy(),
-            'residual_water': blf.numpy(),
-            'spectral_fit': None,
-            'quantities': quantities,
-            }
-    io.savemat(path + '_spectra.mat', do_compression=True, mdict=dict)
-    print(path + '_spectra.mat')
 
 
 def sort_parameters(params: torch.Tensor,
