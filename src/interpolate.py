@@ -4,13 +4,14 @@ By: chausies
 Nov 13, 2020 - Converted to 3D tensors for PyTorch NN compatability by Ing. John T LaMaster
 Mar 16, 2021 - replaced remaining NumPy with PyTorch implementation
 Jan 21, 2022 - Added the Cubic Hermite Modified Akima Interpolation which better handles undulations and over-/undershoots
+Mar 30, 2023 - Added Cubic Hermite Akima for completeness
 
 Modified Akima is prefered for general MRS applications as it can reliably handle spectra at various stages of processing
 '''
 import torch
 import torch.nn as nn
 
-__all__ = ['CubicHermiteSplines', 'CubicHermiteMAkima']
+__all__ = ['CubicHermiteSplines', 'CubicHermiteAkima', 'CubicHermiteMAkima']
 
 
 class CubicHermite(nn.Module):
@@ -67,6 +68,40 @@ class CubicHermiteSplines(CubicHermite):
     def __init__(self, xaxis: torch.Tensor, signal: torch.Tensor):
         super().__init__(xaxis, signal)
         self.m = torch.cat([self.m[...,0].unsqueeze(-1), (self.m[...,1:] + self.m[...,:-1]) / 2, self.m[...,-1].unsqueeze(-1)], dim=-1)
+    
+    
+class CubicHermiteAkima(CubicHermite):
+    '''
+    Cubic Hermite Akima Interpolation
+    https://blogs.mathworks.com/cleve/2019/04/29/makima-piecewise-cubic-interpolation/
+    
+    Written by: Ing. John T LaMaster, 2022
+    
+    References:
+    - https://en.wikipedia.org/wiki/Cubic_Hermite_spline
+    - https://de-m-wikipedia-org.translate.goog/wiki/Akima-Interpolation?_x_tr_sl=de&_x_tr_tl=en&_x_tr_hl=en&_x_tr_pto=sc
+    - https://en.wikipedia.org/wiki/Akima_spline ***
+    '''
+    def __init__(self, xaxis: torch.Tensor, signal: torch.Tensor):
+        super().__init__(xaxis, signal)
+        d0 = 2 * self.m[...,0] - self.m[...,1]
+        m0 = 2 * d0 - self.m[...,0]
+        dn = 2 * self.m[...,-1] - self.m[...,-2]
+        mn = 2 * dn - self.m[...,-1]
+        self.m = torch.cat([m0.unsqueeze(-1), d0.unsqueeze(-1), self.m, dn.unsqueeze(-1), mn.unsqueeze(-1)], dim=-1)
+        
+        weights = torch.abs(self.m[...,:-1] - self.m[...,1:])
+        weights1 = weights[...,:-2].clone()
+        weights2 = weights[...,2:].clone()
+        delta1 = self.m[...,1:-2].clone()
+        delta2 = self.m[...,2:-1].clone()
+        weights12 = weights1 + weights2 + 1e-6
+        
+        self.m = (weights2 / weights12) * delta1 + (weights1 / weights12) * delta2
+        self.m[(weights12==0)] = 0.
+        
+        ind = (weights1==0) & (weights2==0)
+        self.m[ind] = (delta1[ind] + delta2[ind]) / 2
     
     
 class CubicHermiteMAkima(CubicHermite):
