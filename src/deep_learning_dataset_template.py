@@ -1,7 +1,11 @@
 '''
 This is a template for sampling parameters for deep learning applications. It is
 annotated so that it can be used as a template for further customization. Otherwise
-it can be used as is to generate datasets for deep learning applications.
+it can be used as is to generate datasets for deep learning applications. 
+
+To date, most DL applications work with spectra in the frequency domain. The desired
+crop range in ppm can be specified in the config.json file. Should time-domain FIDs
+be required, that can also be specified in the config file.
 
 Written by: Ing. John T LaMaster, 2023
 '''
@@ -109,11 +113,19 @@ def sample(inputs):
     # One Gaussian value is used for metabolites and the other is used for 
     # MM/Lip - but only 2 values! Should an additional group be separated, this 
     # and the pm.initialize() code will need to be updated.
-    for n in ind['g']:
-        if n>0 and n<l-g-1:
-            params[:,n] = params[:,ind['g'][0]].clone()
-        if n>l-g-1:
-            params[:,n] = params[:,ind['g'][int(l-g-1)]].clone()
+    if not config.b0:
+        for n in ind['g']:
+            if n>0 and n<l-g-1:
+                params[:,n] = params[:,ind['g'][0]].clone()
+            if n>l-g-1:
+                params[:,n] = params[:,ind['g'][int(l-g-1)]].clone()
+    else:
+        # The B0 field distortions are modeled instead of using a Gaussian term for the metabolties
+        for n in ind['g']:
+            if n>0 and n<l-g-1:
+                params[:,n].fill_(0.)
+            if n>l-g-1:
+                params[:,n] = params[:,ind['g'][int(l-g-1)]].clone()
 
     
     # Randomly drop some metabolites and their line broadening and fshifts
