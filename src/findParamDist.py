@@ -90,10 +90,21 @@ if __name__=='__main__':
 
     args = parser.parse_args()
 
+    # Create the save directory
     os.makedirs(args.savedir, exist_ok=True)
-    assert os.path.isfile(args.paramPath)
-    assert os.path.splitext(args.paramPath)[-1].lower() in ['.mat']
+    
+    # Specifying a single file
+    if os.path.isfile(args.paramPath):
+        assert os.path.splitext(args.paramPath)[-1].lower() in ['.mat']
 
+    # Specifying a list of files
+    if isinstance(args.paramPath, str):
+        args.paramPath = [path for path in args.paramPath.split(',')]
+
+    # Specifying a directory of files
+    if os.isdir(args.paramPath):
+        args.paramPath = [path for path in os.listdir(args.paramPath) if os.path.splitext(path)[-1].lower() in ['.mat']]
+    
     main(args)
 
 
