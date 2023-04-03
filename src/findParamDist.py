@@ -88,7 +88,8 @@ if __name__=='__main__':
     parser.add_argument('--savedir', type=str)
     parser.add_argument('--selectionMetric', type=str, default='sumsquare_error', help='Options are: sumsquare_error, aic, bic, kl_div, ks_statistic, ks_pvalue')
     parser.add_argument('--Nbest', type=int, default=5)
-    parser.add_argument('--commonDist', type=bool, default=False)
+    parser.add_argument('--commonDist', type=bool, default=True)
+    parser.add_argument('--comprehensiveDist', type=bool, action="store_true", dest='commonDist', default=False)
     parser.add_argument('--n', type=int, default=-1, help='Used to vary sample size when assessing Fitter performance')
     
 
