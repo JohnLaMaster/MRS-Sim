@@ -12,6 +12,7 @@ import scipy.io.loadmat as ioloadmat
 from fitter import Fitter as Fitter
 from fitter import get_common_distributions, get_distributions
 
+
 sys.path.append('../')
 
 
@@ -42,9 +43,10 @@ def loadParams(parameters_path: str, ):
 
 
 def findDistribution(v: np.ndarray,
-                     comprehensive: bool=False):
+                     common: bool=False,
+                     n: int=-1) -> generator:
     # Iterate through the num of fitted metabolites per variable
-    dist = get_distributions() if comprehensive else get_common_distributions()
+    dist = get_common_distributions() if common else get_distributions()
     for i in range(v.shape[-1]):
         f = Fitter(data=v[...,i], distributions=dist)
         f.fit(progress=True)
@@ -54,21 +56,22 @@ def findDistribution(v: np.ndarray,
 def main(args):
     # Load the parameters to find their distributions
     params = loadParams(args.paramPath)
+    args.n = params.shape[0] if n==-1 else args.n
     distributions, best = OrderedDict(), OrderedDict()
     dist_names = ['']
 
     # Iterate through the parameters
     for k, v in params.items():
-        for i, f in enumerate(findDistribution(v, args.comprehensiveDist)):
+        for i, f in enumerate(findDistribution(v, args.commoneDist)):
             # Identify the top-k best fitting distributions
             distributions.update({'{}_{}'.format(k,i): 
                                   f.summary(Nbest=args.Nbest, method=args.selectionMetric).to_dict()})
-            with open(args.savedir + 'parameter_distribution_fits.json', 'w') as file:
+            with open(args.savedir + 'summary_of_{}_best_fits.json'.format(args.Nbest), 'w') as file:
                 json.dump(distributions, file, indent=4, separators=(',', ': '))
 
             # Save the best fitting distribution and its parameters
             best.update({'{}_{}'.format(k,i): f.get_best()})
-            with open(args.savedir + 'best_parameter_distributions.json', 'w') as file:
+            with open(args.savedir + 'best_fit.json', 'w') as file:
                 json.dump(best, file, indent=4, separators=(',', ': '))
 
             # Save the top-k best fitting distribution plots
@@ -83,9 +86,10 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--paramPath', type=str, help='Path to .mat file exported after Osprey fitting')
     parser.add_argument('--savedir', type=str)
-    parser.add_argument('--selectionMetric', type=str, default='sumsquare_error')
+    parser.add_argument('--selectionMetric', type=str, default='sumsquare_error', help='Options are: sumsquare_error, aic, bic, kl_div, ks_statistic, ks_pvalue')
     parser.add_argument('--Nbest', type=int, default=5)
-    parser.add_argument('--comprehensiveDist', type=bool, default=False)
+    parser.add_argument('--commonDist', type=bool, default=False)
+    parser.add_argument('--n', type=int, default=-1, help='Used to vary sample size when assessing Fitter performance')
     
 
     args = parser.parse_args()
