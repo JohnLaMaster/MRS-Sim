@@ -187,8 +187,8 @@ def HilbertTransform(data: torch.Tensor,
     TODO: check in a notebook to make sure lo de la media works well.
     '''
     assert(data.ndim>=3)
-    def Fourier(data): return rfft(data, dim=-1)
-    def invFourier(data): return irfft(data, dim=-1)
+    def Fourier(data): return fft(data, dim=-1)
+    def invFourier(data): return ifft(data, dim=-1)
 
     N = data.shape[dim]
     mn = torch.mean(data, dim=-1, keepdim=True)
@@ -204,7 +204,7 @@ def HilbertTransform(data: torch.Tensor,
     a = Xf.mul(h)
     out = invFourier(a) + mn
 
-    return torch.cat([data, out], dim=-2)
+    return torch.cat([out.real, out.imag], dim=-2)
 
 
 def inv_Fourier_Transform(signal: torch.Tensor, 
