@@ -84,15 +84,12 @@ def complex_exp(signal: torch.Tensor,
     assumed to be zero. If a real component should be used, it must be 
     supplied at index = 0 along dimension 1.
     '''
-    theta = theta if theta.shape[-2]==2 else torch.cat([
-                torch.zeros_like(theta), theta], dim=-2)
-    
-    if real: 
-        real = signal.mul(torch.cos(theta[...,1,:].unsqueeze(-2)))
-        imag = signal.mul(torch.sin(theta[...,1,:].unsqueeze(-2)))
-
-        return torch.cat([real, imag], dim=-2).mul(
-                    torch.exp(theta[...,0,:].unsqueeze(-2)))
+    if real:
+        theta = theta if theta.shape[-2]==2 else torch.cat([
+                    theta, torch.zeros_like(theta)], dim=-2)
+    else:
+        theta = theta if theta.shape[-2]==2 else torch.cat([
+                    torch.zeros_like(theta), theta], dim=-2)
     
     real = signal[...,0,:].mul(torch.cos(theta[...,1,:])) - \
             signal[...,1,:].mul(torch.sin(theta[...,1,:]))
