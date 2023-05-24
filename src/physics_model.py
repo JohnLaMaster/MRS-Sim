@@ -441,17 +441,24 @@ class PhysicsModel(nn.Module):
         dB0 += y
         dB0  = dB0.repeat(1,1,1,z.shape[-1]) + z
         dB0 += mean
+        # dB0.shape = [bS, length, length, length]
+        # # output.shape = [bS, 1, length^3, 1] * [1, 1, 1, 8192] 
+        # #                => [bS, 1, length^3, 8192]
 
-        # output.shape = [bS, length, length, length]
-        dB0 = dB0.unsqueeze(1).flatten(start_dim=2, end_dim=-1).unsqueeze(-1)
-        # output.shape = [bS, 1, length^3, 1] * [1, 1, 1, 8192] 
-        #                => [bS, 1, length^3, 8192]
-        dB0 = dB0 * t
-
-        identity = torch.ones_like(t).repeat(1,1,2,1)
-
-        return complex_exp(identity, 
-                           -1*dB0.unsqueeze(-2).deg2rad()).sum(dim=-3)
+        # Let's make a for-loop to iterate over the voxel z- and y-dimensions
+        # I usually avoid for-loops, but it is necessary here. RAM skyrockets
+        # without it!
+        identity, out = torch.ones_like(t).repeat(1,1,2,1), 0
+        for i in range(dB0.shape[-1]): # z-dimension
+            for j in range(dB0.shape[-2]): # y-dimension
+                temp = dB0[...,j,i].unsqueeze(-1).unsqueeze(-1)
+                temp = temp.unsqueeze(1).flatten(start_dim=2, end_dim=-1)
+                temp = temp.unsqueeze(-1) * t
+                out += complex_exp(identity,
+                                   -1*temp.unsqueeze(-2).deg2rad()).sum(dim=-3)
+        del temp
+        # Eqn 4 in Ningzhi Li 2015, "Spectral fitting using basis set..."
+        return out
 
 
     def coil_freq_drift(self,
