@@ -304,6 +304,13 @@ class PhysicsModel(nn.Module):
         return dct, ind
 
     
+    def add_inhomogeneities(self,
+                            fid: torch.Tensor,
+                            B0: torch.Tensor
+                           ) -> torch.Tensor:
+        return fid * B0
+
+    
     def add_offsets(self,
                     fid: torch.Tensor,
                     offsets: tuple=None,
@@ -355,6 +362,10 @@ class PhysicsModel(nn.Module):
                                                      cfg.upper_bnd, 
                                                      cfg.length), 
                                  cfg.windows)
+        trend = batch_linspace(baselines[...,0].unsqueeze(-1),
+                       baselines[...,-1].unsqueeze(-1), 
+                       cfg.length)
+        baselines = baselines - trend
         baselines, _ = self.normalize(signal=baselines, fid=False, denom=None, noisy=-3)
 
         if cfg.rand_omit>0: 
@@ -369,15 +380,14 @@ class PhysicsModel(nn.Module):
         # Hilbert transform makes the imaginary component. Then resample 
         # acquired range to cropped range.
         ppm = self._ppm.clone()
-        raw_baseline = HilbertTransform(
-                        self.sim2acquired(baselines * config['scale'], 
-                                          [ppm.amin(keepdims=True), 
-                                           ppm.amax(keepdims=True)], self.ppm)
-                       )
+        cropRange = [torch.as_tensor(val).unsqueeze(-1) for val in cfg.cropRange]
+        raw_baseline = self.sim2acquired(baselines * config['scale'], 
+                                         [cropRange[0], cropRange[1]],
+                                         self.ppm)
         ch_interp = CubicHermiteInterp(xaxis=self.ppm, signal=raw_baseline)
         baselines = ch_interp.interp(xs=self.ppm_cropped)
 
-        return baselines.fliplr(), raw_baseline.fliplr()
+        return raw_baseline.fliplr(), raw_baseline
     
     
     def B0_inhomogeneities(self, 
@@ -389,8 +399,11 @@ class PhysicsModel(nn.Module):
         parameter(s) defining the range of the B0 variation across the MRS 
         voxel. complex_exp(torch.ones_like(fid), param*t).sum(across this extra 
         spatial dimension) return fid * sum(complex_exp)
+        
+        24.05.23: Extremely expensive computations! Need to find an alternative
+        or a method of reducing the required amount of RAM.
         '''
-        t = self.t.clone().mT # [1, 8192] 
+        t = self.t.clone() # [1, 8192] 
         # FID should be 4 dims = [bS, basis fcns, channels, length]
         for _ in range(4 - t.ndim): t = t.unsqueeze(0)
         for _ in range(4 - param.ndim): param = param.unsqueeze(1)
@@ -438,7 +451,7 @@ class PhysicsModel(nn.Module):
         identity = torch.ones_like(t).repeat(1,1,2,1)
 
         return complex_exp(identity, 
-                           (-1*dB0.unsqueeze(-2)).deg2rad()).sum(dim=-3)
+                           -1*dB0.unsqueeze(-2).deg2rad()).sum(dim=-3)
 
 
     def coil_freq_drift(self,
@@ -618,13 +631,12 @@ class PhysicsModel(nn.Module):
         elif std_dev.ndim>=4:
             if std_dev.shape[-2]==1: std_dev = std_dev.squeeze(-2)
             elif std_dev.shape[-1]==1: std_dev = std_dev.squeeze(-1)
-        if not transients: std_dev = std_dev.squeeze(-2)
-        # print('std_dev.shape {}'.format(std_dev.shape))
+        if isinstance(transients, type(None)): std_dev = std_dev.squeeze(-2)
         
         if uncorrelated: 
             # Quadrature coils where real/phase are recorded separately
             # Separate coils ==> uncorrelated noise for real/phase channels
-            std_dev = std_dev.unsqueeze(-2)
+            std_dev = std_dev.repeat_interleave(repeats=2,dim=-1)
 
         '''
         Notes:
@@ -638,24 +650,10 @@ class PhysicsModel(nn.Module):
         e = e.sample([fid.shape[-1]]),0,-1)
         mn = e.mean(dim=-1, keepdims=True)
         std = e.std(dim=-1, keepdims=True)
+        std[std==0] += 1e-6
         e = (e - mn).div(std).mul(std_dev.unsqueeze(-1))
         
-#         test, cnt, threshold = True, -1, 0.1
-#         e0 = HilbertTransform(e)
-#         while test:
-#             cnt += 1
-#             # print('refinement round {}'.format(cnt))
-#             new_snr = max_val/e0.std(dim=-1, keepdims=True)
-#             ind = torch.where(new_snr>=(lin_snr-threshold),   0, 1)
-#             ind = torch.where(new_snr<=(lin_snr+threshold), ind, 1)
-#             if not (ind==1).any(): test = False
-#             e0 = HilbertTransform(self.refine_noise(fid_shape=fid.shape[-1], ind=ind, lin_snr=lin_snr, mx_val=max_val, std_dev=std_dev, e=e))
-#         e = e0
-        
-        if uncorrelated:
-            return inv_Fourier_Transform(e)
-
-        return inv_Fourier_Transform(HilbertTransform(e))
+        return inv_Fourier_Transform(e)
 
     def refine_noise(self,
                      fid_shape, # fid.shape[-1]
@@ -757,8 +755,7 @@ class PhysicsModel(nn.Module):
         In a Voigt lineshape model, each basis line has its own Lorentzian 
         value. Fat- and Water-based peaks use one Gaussian value per group.
         '''
-        # t = self.t.clone().t().unsqueeze(0)
-        t = self.t.clone().unsqueeze(0)#.unsqueeze(0)
+        t = self.t.clone().unsqueeze(0)
         d = d.unsqueeze(-1).unsqueeze(-1).repeat(1,1,2,1)
         g = g.unsqueeze(-1).unsqueeze(-1).expand_as(d)
         if d.dtype==torch.float64: d = d.float()
@@ -953,7 +950,6 @@ class PhysicsModel(nn.Module):
         ppm = ppm if not isinstance(ppm, type(None)) else self.ppm
         ppm = ppm.unsqueeze(0).squeeze()
         if not (ppm[...,0]<ppm[...,-1]): 
-            # print('flipping ppm')
             ppm = torch.flip(ppm.unsqueeze(0), dims=[-1]).squeeze(0)
         
         if isinstance(target_range, type(None)): target_range = self.cropRange
@@ -1038,8 +1034,6 @@ class PhysicsModel(nn.Module):
             res_water, raw_res_water = None, None
 
         return out, baselines, res_water
-#         return out, raw_baselines, raw_res_water
-        # return (raw_baselines, raw_res_water), baselines, res_water
 
 
     def sim2acquired(self, 
@@ -1173,7 +1167,8 @@ class PhysicsModel(nn.Module):
         '''
 
         # Apply B0 inhomogeneities
-        if b0: fid *= B0
+        if b0: 
+            fid = self.add_inhomogeneities(fid, B0)
         
         # Line broadening
         if broadening:
