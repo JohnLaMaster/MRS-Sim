@@ -1,4 +1,4 @@
-# MRS-Sim: Open-Source Framework for Simulating Realistic, In Vivo-like Clinical Spectra
+# <img src="https://github.com/JohnLaMaster/MRS-Sim/assets/7785925/c9563f8a-0034-4edd-bf20-551dbe86c1ac" width="100"> MRS-Sim: Open-Source Framework for Simulating Realistic, In Vivo-like Clinical Spectra
 In review: Expected publication in Summer 2023.
 
 *Note: Code is expected to be finalized by the publication date. Be sure to check back during the summer 2023 for the first official release.
@@ -35,4 +35,5 @@ Would you like to add additional functionality to this software? Are you working
 
 # Working with the model
 If you use one of the provided configuration templates, please cite the following paper (citation will appear once published). If you would like to collaborate to create a dataset, please reach out at john.t.lamaster (at) gmail dot com.
+
 
