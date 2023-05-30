@@ -128,18 +128,19 @@ def sample(inputs):
                 if ii==1: 
                     params[int(i-1),n].fill_(0.001)
                     params[i,ii].fill_(i)
-
-    # # Comparing phased, zero-, and first-order phase
-    for i in range(1,6): params[i,:] = params[0,:].clone()
-    for i in [0,2,4]:
-        params[i,ind['phi0']].fill_(0.0)
-        params[i,ind['phi1']].fill_(0.0)
-    params[1,ind['phi0']].fill_(0.0)
-    params[3,ind['phi0']].fill_(45.0)
-    params[5,ind['phi0']].fill_(0.0)
-    params[1,ind['phi1']].fill_(0.0)
-    params[3,ind['phi1']].fill_(0.0)
-    params[5,ind['phi1']].fill_(-20.0)
+    
+    if config.phi_samples:
+        # # Comparing phased, zero-, and first-order phase
+        for i in range(1,6): params[i,:] = params[0,:].clone()
+        for i in [0,2,4]:
+            params[i,ind['phi0']].fill_(0.0)
+            params[i,ind['phi1']].fill_(0.0)
+        params[1,ind['phi0']].fill_(0.0)
+        params[3,ind['phi0']].fill_(45.0)
+        params[5,ind['phi0']].fill_(0.0)
+        params[1,ind['phi1']].fill_(0.0)
+        params[3,ind['phi1']].fill_(0.0)
+        params[5,ind['phi1']].fill_(-20.0)
     
 
     '''
