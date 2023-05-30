@@ -1,7 +1,7 @@
 # <img src="https://github.com/JohnLaMaster/MRS-Sim/assets/7785925/c9563f8a-0034-4edd-bf20-551dbe86c1ac" width="100"> MRS-Sim: Open-Source Framework for Simulating Realistic, In Vivo-like Clinical Spectra
-In review: Expected publication in Summer 2023.
+**In review: Expected publication in _Summer 2023_.**
 
-***Note:** Code is expected to be finalized by the publication date. Be sure to check back during the summer 2023 for the first official release.
+***Note:** Code is still in development and is expected to be finalized by the date of publication. Be sure to check back during the summer 2023 for the first official release.
 
 _Abstract:_ This work presents the first open-source, publicly available \textit{in-vivo}-like data simulator for generating synthetic magnetic resonance spectroscopy data that is geared towards community development. This simulator uses high fidelity basis functions that are simulated for sequence- and brand-specific scenarios. The underlying physics model includes all spectral components found in spectral fitting routines, i.e. zero- and first-order phase, Voigtian lineshapes, frequency shifts, and eddy currents. In addition to the standard spectra types, this model can simulate multi-coil transients with or without coil artifacts as well as raw and pre-processed spectra. A $B_0$ field map simulator can be used to model severe susceptibility effects commonly found near the sinuses or deep brain structures. Finally, a novel semi-parametric simulator for residual water regions and baseline offsets provides in vivo-like artifacts. Accompanying software can analyze the distributions and ranges of parameters in fitted datasets which allows researchers to tailor synthetic datasets to their clinical ones.
 
