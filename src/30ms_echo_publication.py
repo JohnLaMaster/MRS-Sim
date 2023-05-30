@@ -48,7 +48,7 @@ def sample(inputs):
         params[:,ind['pcr']].fill_(0.475/denom)
 
     # print(ind)
-    # Amplitudes taken from Osprey Example fitting
+
     names = ["Asc", "Asp", "Ch", "Cr", "GABA", "GPC", "GSH", "Gln", "Glu", "mI", "Lac", "NAA", "NAAG", "PCh", "PCr", "PE", "sI", "Tau", "MM09", "MM12", "MM14", "MM17", "MM20", "Lip09", "Lip13", "Lip20"]
     amps = [0.0804920187119920, 0, 0.1081, 0.507854651524663, 0.455613005467203, 0.221068064161334,  0.0968670765788001, 0.209273371106189, 1.45415790831963, 0.449486907354451,  0.0164778245907856, 1.45445578745539, 0.320213124374504, 0.1130, 0.492145348475337, 0, 0, 0.108357885219082, 10.314097589906174, 10.402136461787936, 10.358101078275321, 10.452705224928629, 10.551475712699752, 10.719485302705014,  10.414165486070721, 0]
     for n, v in zip(names,amps):
@@ -87,49 +87,60 @@ def sample(inputs):
             params[:,n] = params[:,ind['g'][int(l-g-1)]].clone()
 
     
-    if config.num_coils>1:
-        print('>>> Transients')
-        factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_snr']].shape)
-        params[:,ind['coil_snr']] = factors
-        # Values are sampled from a Gaussian mu=1, min/max=0/2
-        # The linear SNR is calculated and scaled based on the number of transients
-        # Then the linear SNR is scaled about 1.0 so mu = lin_snr
-        if config.coil_sens:
-            print('>>> Coil Sensitivities')
-            params[:,ind['coil_sens']] = torch.distributions.normal.Normal(1,0.5).sample(params[:,ind['coil_sens']].shape).clamp(min=0.0,max=2.0)
-        
-        if config.coil_fshift:
-            print('>>> Coil Frequency Drift')
-            factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_fshift']].shape)
-            params[:,ind['coil_fshift']] = factors * params[:,ind['coil_fshift']][0]
-        
-        if config.coil_phi0:
-            print('>>> Coil Phase Drift')
-            factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_phi0']].shape)
-            params[:,ind['coil_phi0']] = factors * params[:,ind['coil_phi0']][0]
+#     if config.num_coils>1:
+      print('>>> Transients')
+      factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_snr']].shape)
+      params[:,ind['coil_snr']] = factors
+      # Values are sampled from a Gaussian mu=1, min/max=0/2
+      # The linear SNR is calculated and scaled based on the number of transients
+      # Then the linear SNR is scaled about 1.0 so mu = lin_snr
+      if config.coil_sens:
+          print('>>> Coil Sensitivities')
+          params[:,ind['coil_sens']] = torch.distributions.normal.Normal(1,0.5).sample(params[:,ind['coil_sens']].shape).clamp(min=0.0,max=2.0)
 
-    # # ================================================================================
-    # # Create pairs of samples with the same parameters - B0 inhomogeneities examples
-    # for i in [1,3,5]:
-    #     params[i,:] = params[int(i-1),:].clone()
+      if config.coil_fshift:
+          print('>>> Coil Frequency Drift')
+          factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_fshift']].shape)
+          params[:,ind['coil_fshift']] = factors * params[:,ind['coil_fshift']][0]
 
-    #     if config.b0:
-    #         params[i,ind['b0']].fill_(0.0)
-    #         for n in ind['b0_dir']: params[i,n].fill_(1**10-6)
-    #     for n in ind['g']:
-    #         params[i,n].fill_(0.0)
-    # # ================================================================================
+      if config.coil_phi0:
+          print('>>> Coil Phase Drift')
+          factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_phi0']].shape)
+          params[:,ind['coil_phi0']] = factors * params[:,ind['coil_phi0']][0]
 
-    # # ================================================================================
-    # # Create pairs of samples with the same parameters - B0 inhomogeneities examples
-    # for i in range(1,6): params[i,:] = params[0,:].clone()
-    # for i in [1,3,5]:
-    #     # params[i,:] = params[int(i-1),:].clone()
-    #     for ii, n in enumerate(ind['ecc']): 
-    #         if ii==1: 
-    #             params[int(i-1),n].fill_(0.001)
-    #             params[i,ii].fill_(i)
-    # # ================================================================================
+    if config.B0_samples
+        # Create pairs of samples with the same parameters - B0 inhomogeneities examples
+        for i in [1,3,5]:
+            params[i,:] = params[int(i-1),:].clone()
+
+            if config.b0:
+                params[i,ind['b0']].fill_(0.0)
+                for n in ind['b0_dir']: params[i,n].fill_(1**10-6)
+            for n in ind['g']:
+                params[i,n].fill_(0.0)
+
+    if config.EC_samples:
+        # Create pairs of samples with the same parameters - B0 inhomogeneities examples
+        for i in range(1,6): params[i,:] = params[0,:].clone()
+        for i in [1,3,5]:
+            # params[i,:] = params[int(i-1),:].clone()
+            for ii, n in enumerate(ind['ecc']): 
+                if ii==1: 
+                    params[int(i-1),n].fill_(0.001)
+                    params[i,ii].fill_(i)
+
+    # # Comparing phased, zero-, and first-order phase
+    for i in range(1,6): params[i,:] = params[0,:].clone()
+    for i in [0,2,4]:
+        params[i,ind['phi0']].fill_(0.0)
+        params[i,ind['phi1']].fill_(0.0)
+    params[1,ind['phi0']].fill_(0.0)
+    params[3,ind['phi0']].fill_(45.0)
+    params[5,ind['phi0']].fill_(0.0)
+    params[1,ind['phi1']].fill_(0.0)
+    params[3,ind['phi1']].fill_(0.0)
+    params[5,ind['phi1']].fill_(-20.0)
+    
 
     '''
     If certain parts of the model are turned off, then their values should be zeroed out.
@@ -149,19 +160,19 @@ def sample(inputs):
     if not config.noise: params[:,ind['snr']].fill_(0.0)
     if not config.phi0: params[:,ind['phi0']].fill_(0.0)
     if not config.phi1: params[:,ind['phi1']].fill_(0.0)
-    # Multi_coil is dealt with above
-#     if config.num_coils<=1:
-#         params[:,ind['coil_snr']].fill_(0.0)
-#         params[:,ind['coil_sens']].fill_(0.0)
-#         params[:,ind['coil_fshift']].fill_(0.50)
-#         params[:,ind['coil_phi0']].fill_(0.0)
+#     Multi_coil is dealt with above
+    if config.num_coils<=1:
+        params[:,ind['coil_snr']].fill_(0.0)
+        params[:,ind['coil_sens']].fill_(0.0)
+        params[:,ind['coil_fshift']].fill_(0.50)
+        params[:,ind['coil_phi0']].fill_(0.0)
     
     params[:,ind['snr']].fill_(15)#8.6)
 
     return config, resWater_cfg, baseline_cfg, pm, l, ind, p, totalEntries, params
 
 
-#/home/john/Documents/Research/In-Vivo-MRSI-Simulator/dataset/30ms_publication/dataset_spectra_sampled_parameters.mat
+#~/In-Vivo-MRSI-Simulator/dataset/30ms_publication/dataset_spectra_sampled_parameters.mat
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--savedir', type=str, default='./dataset/30ms_publication')
@@ -172,8 +183,6 @@ if __name__=='__main__':
 
     args = parser.parse_args()
 
-    # torch.distributed.init_process_group(backend='gloo', world_size=4)
-    
     os.makedirs(args.savedir, exist_ok=True)
 
     # Simulate
@@ -186,22 +195,18 @@ if __name__=='__main__':
     path = simulate(sampled,args=args)
 
     io.savemat(path+'_sampled_parameters.mat', mdict={'params': sampled[-1]})
-   
-    # config, resWater_cfg, baseline_cfg, pm, l, ind, p, totalEntries = prepare(config_file)
-    # config, params, ind = sample(config, ind, l, pm, totalEntries)
-    # simulate(config=config, pm=pm, params=params, ind=ind, args=args, 
-    #          resWater_cfg=resWater_cfg, baseline_cfg=baseline_cfg)
+
 
 
 
 """
-(python3.9a) john@JTL-G101-Workspace:~/Documents/Research/In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/8_channel_MRS-SIM_te30_PRESS_GE_config.json'
+(python3.9a) john@JTL-G101-Workspace:~/In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/8_channel_MRS-SIM_te30_PRESS_GE_config.json'
 
-(python3.9a) john@JTL-G101-Workspace:~/Documents/Research/In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/8_channel_MRS-SIM_te144_PRESS_GE_config.json' --savedir './dataset/144ms_publication'
+(python3.9a) john@JTL-G101-Workspace:~//In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/8_channel_MRS-SIM_te144_PRESS_GE_config.json' --savedir './dataset/144ms_publication'
 
-(python3.9a) john@JTL-G101-Workspace:~/Documents/Research/In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/coil_combined_MRS-SIM_te30_PRESS_GE_config.json' --parameters '/home/john/Documents/Research/In-Vivo-MRSI-Simulator/dataset/30ms_publication/dataset_spectra_sampled_parameters.mat' --savedir './dataset/CC_30ms_publication'
+(python3.9a) john@JTL-G101-Workspace:~//In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/coil_combined_MRS-SIM_te30_PRESS_GE_config.json' --parameters '/home/john/Documents/Research/In-Vivo-MRSI-Simulator/dataset/30ms_publication/dataset_spectra_sampled_parameters.mat' --savedir './dataset/CC_30ms_publication'
 
-(python3.9a) john@JTL-G101-Workspace:~/Documents/Research/In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/coil_combined_MRS-SIM_te144_PRESS_GE_config.json' --parameters '/home/john/Documents/Research/In-Vivo-MRSI-Simulator/dataset/144ms_publication/dataset_spectra_sampled_parameters.mat' --savedir './dataset/CC_144ms_publication'
+(python3.9a) john@JTL-G101-Workspace:~//In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/coil_combined_MRS-SIM_te144_PRESS_GE_config.json' --parameters '/home/john/Documents/Research/In-Vivo-MRSI-Simulator/dataset/144ms_publication/dataset_spectra_sampled_parameters.mat' --savedir './dataset/CC_144ms_publication'
 
 
 python ./src/30ms_echo_publication.py --config_file './src/coil_combined_MRS-SIM_te30_PRESS_GE_config_dirty.json' --savedir './dataset/CC_30ms_publication_dirty'
