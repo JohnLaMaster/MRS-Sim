@@ -38,9 +38,17 @@ There are several notable differences from standard simulation models.
 The code and output files used to generate the samples for the manuscript are currently being added. Sample simulations are being added to the images folder.  
 
 # How to Contribute?
+## Code Base
 Would you like to add additional functionality to this software? Are you working with types of spectra that are not currently included? Please feel free to make a pull request. If you already have code that you would like to share, please reach out and we'll see about incorporating it. If you are writing code for this work, please make sure it is VERY well documented so we know how it fits into the repo and what the expected inputs and outputs are.
+
+## Fitting Parameters Dataset Collection
+An Open Science Framework project is currently being put together. The goal of this data repository is to collect the fitting parameters from a variety of clinical scenarios in order to develop a unified prior distribution that will be used to sample model parameters for MRS-Sim. The following is a brief overview:
+    1. Fit your data using Osprey and set the flag opts.exportParams.flag=1 and 
+       then add the savedir to opts.exportParams.path='path/to/save/dir'
+    2. Upload the exported fitting parameters to the repository
+Quality control procedures are still being developed. Once the SOP and logistics 
+have been finalized, the link to the repo will be posted here. Until then, if 
+you are interested in this portion of the project, please feel free to email me.
 
 # Working with the model
 If you use one of the provided configuration templates, please cite the following paper (citation will appear once published). If you would like to collaborate to create a dataset, please reach out at john.t.lamaster (at) gmail dot com.
-
-
