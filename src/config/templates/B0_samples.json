@@ -1,5 +1,6 @@
 {
     "totalEntries": 6,
+    "B0_samples": true,
     "PM_basis_set": "PRESS_30_GE_2000.mat",
     "metabolites": ["Asc", "Asp", "Ch", "Cr", "GABA", "Gln", "Glu", "GPC", "GSH", "Lac", "mI", "NAA", "NAAG", "PCh", "PCr", "PE", "sI", "Tau", "MM09", "MM12", "MM14", "MM17", "MM20", "Lip09", "Lip13", "Lip20"], 
     "wrt_metab": "Cr,PCr",
