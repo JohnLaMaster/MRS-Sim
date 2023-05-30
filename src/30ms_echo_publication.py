@@ -201,14 +201,14 @@ if __name__=='__main__':
 
 
 """
-(python3.9a) john@JTL-G101-Workspace:~/In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/8_channel_MRS-SIM_te30_PRESS_GE_config.json'
+$ python ./src/30ms_echo_publication.py --config_file './src/config/templates/B0_samples.json' --savedir './dataset/B0_samples'
 
-(python3.9a) john@JTL-G101-Workspace:~//In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/8_channel_MRS-SIM_te144_PRESS_GE_config.json' --savedir './dataset/144ms_publication'
+$ python ./src/30ms_echo_publication.py --config_file './src/templates/EC_samples.json' --savedir './dataset/EC_samples'
 
-(python3.9a) john@JTL-G101-Workspace:~//In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/coil_combined_MRS-SIM_te30_PRESS_GE_config.json' --parameters '/home/john/Documents/Research/In-Vivo-MRSI-Simulator/dataset/30ms_publication/dataset_spectra_sampled_parameters.mat' --savedir './dataset/CC_30ms_publication'
+$ python ./src/30ms_echo_publication.py --config_file './src/transient_samples.json' --savedir './dataset/transient_samples'
 
-(python3.9a) john@JTL-G101-Workspace:~//In-Vivo-MRSI-Simulator$ python ./src/30ms_echo_publication.py --config_file './src/coil_combined_MRS-SIM_te144_PRESS_GE_config.json' --parameters '/home/john/Documents/Research/In-Vivo-MRSI-Simulator/dataset/144ms_publication/dataset_spectra_sampled_parameters.mat' --savedir './dataset/CC_144ms_publication'
+$ python ./src/30ms_echo_publication.py --config_file './src/coil_combined_clean.json' --savedir './dataset/CC_30ms_clean'
 
+$ python ./src/30ms_echo_publication.py --config_file './src/coil_combined_with_artifacts.json' --savedir './dataset/CC_30ms_with_artifacts'
 
-python ./src/30ms_echo_publication.py --config_file './src/coil_combined_MRS-SIM_te30_PRESS_GE_config_dirty.json' --savedir './dataset/CC_30ms_publication_dirty'
 """
