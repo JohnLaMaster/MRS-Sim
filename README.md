@@ -5,6 +5,10 @@
 
 _Abstract:_ This work presents the first open-source, publicly available \textit{in-vivo}-like data simulator for generating synthetic magnetic resonance spectroscopy data that is geared towards community development. This simulator uses high fidelity basis functions that are simulated for sequence- and brand-specific scenarios. The underlying physics model includes all spectral components found in spectral fitting routines, i.e. zero- and first-order phase, Voigtian lineshapes, frequency shifts, and eddy currents. In addition to the standard spectra types, this model can simulate multi-coil transients with or without coil artifacts as well as raw and pre-processed spectra. A $B_0$ field map simulator can be used to model severe susceptibility effects commonly found near the sinuses or deep brain structures. Finally, a novel semi-parametric simulator for residual water regions and baseline offsets provides in vivo-like artifacts. Accompanying software can analyze the distributions and ranges of parameters in fitted datasets which allows researchers to tailor synthetic datasets to their clinical ones.
 
+# Model Overview
+<img src="https://github.com/JohnLaMaster/MRS-Sim/assets/7785925/9b835e36-039a-49d1-aa91-da2adb28071e" width="1000">
+
+
 # Basis Sets
 Currently, two basis sets will be uploaded. They are GE PRESS sequences with a spectral width of 2000, 8192 data points, and TE=30 & 144ms. Additional basis sets will be simulated and uploaded for Siemens and Philipps.
 
