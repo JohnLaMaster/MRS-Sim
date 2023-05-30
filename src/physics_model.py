@@ -189,19 +189,19 @@ class PhysicsModel(nn.Module):
         mult.insert(-1,1)
         names.insert(-1,'eddyCurrents_tc')
         mult.insert(-1,1)
-        if num_coils>1: 
-            # Minimum 2 num_coils for the variables to be included in the model
-            names.append('coil_snr')
+#         if num_coils>1: 
+        # Minimum 2 num_coils for the variables to be included in the model
+        names.append('coil_snr')
+        mult.append(num_coils)
+        if coil_sens:
+            names.append('coil_sens')
             mult.append(num_coils)
-            if coil_sens:
-                names.append('coil_sens')
-                mult.append(num_coils)
-            if coil_fshift:
-                names.append('coil_fshift')
-                mult.append(num_coils)
-            if coil_phi0:
-                names.append('coil_phi0')
-                mult.append(num_coils)
+        if coil_fshift:
+            names.append('coil_fshift')
+            mult.append(num_coils)
+        if coil_phi0:
+            names.append('coil_phi0')
+            mult.append(num_coils)
         for n, m in zip(names, mult): 
             for _ in range(m): header.append(n)
             
