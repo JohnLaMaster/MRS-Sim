@@ -30,6 +30,9 @@ There are several notable differences from standard simulation models.
        my work, this has helped DL models better learn the parameter representations by showing what a sample looks like when the 
        parameter is missing. Additionally, uniform distributions are sampled to present more balanced classes to the networks.
 
+# Examples from the manuscript
+The code and output files used to generate the samples for the manuscript are currently being added.
+
 # How to Contribute?
 Would you like to add additional functionality to this software? Are you working with types of spectra that are not currently included? Please feel free to make a pull request. If you already have code that you would like to share, please reach out and we'll see about incorporating it. If you are writing code for this work, please make sure it is VERY well documented so we know how it fits into the repo and what the expected inputs and outputs are.
 
