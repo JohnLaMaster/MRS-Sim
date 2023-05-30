@@ -43,6 +43,7 @@ Would you like to add additional functionality to this software? Are you working
 
 ## Fitting Parameters Dataset Collection
 An Open Science Framework project is currently being put together. The goal of this data repository is to collect the fitting parameters from a variety of clinical scenarios in order to develop a unified prior distribution that will be used to sample model parameters for MRS-Sim. The following is a brief overview:
+
     1. Fit your data using Osprey and set the flag opts.exportParams.flag=1 and 
        then add the savedir to opts.exportParams.path='path/to/save/dir'
     2. Upload the exported fitting parameters to the repository
