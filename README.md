@@ -15,26 +15,29 @@ Currently, two basis sets will be uploaded. They are GE PRESS sequences with a s
 # What makes this model special?
 There are several notable differences from standard simulation models. 
 
-    1. Data can be exported in as .mat files AND NIfTI-MRS! The .mat files make it easy to explore the simulated data in Matlab
-       or Jupyter-Notebooks, etc. NIfTI-MRS makes it possible to quantify the simulations easily. More spectral fitting packages
-       are adding NIfTI-MRS compatability.
+    1. Data can be exported in as .mat files AND NIfTI-MRS! The .mat files make it easy to explore the simulated data 
+       in Matlab or Jupyter-Notebooks, etc. NIfTI-MRS makes it possible to quantify the simulations easily. More 
+       spectral fitting packages are adding NIfTI-MRS compatability.
     2. All the steps in this model are in the opposite order of spectral fitting and processing. Therefore, all the  
-       corresponding parameters are the actual correction values you would need to fit the spectra with a standard pipeline.
-    3. This model aims to always incorporate as many degrees of freedom as possible. The standard variables include amplitudes,
-       Lorentzian and Gaussian lineshapes, (naive) metabolite-level frequency shifts, global frequency shifts, noise, zero- and
-       first-order phase offsets, first-order eddy currents, and baseline signal contributions. Non-standard variables include: 
-       residual water contribution, B0 inhomogeneities, and coil artifacts such as phase unalignment, frequency unalignment, 
-       sampled coil SNR values, and sampled coil sensitivities. As more improvements to spectral fitting are discovered, they
-       can be added to the model.
-    4. On top of a rich baseline modeling, MM/Lip and residual water will be included. Fat/Lip peaks often have  a different
-       frequency shift than the water components because they are less sensitive to temperature changes. Therefore, different
-       frequency shifts are applied to the two groups. MM/Lip signal contributions are included via basis functions from Osprey.
-    5. A variety of quantification methods are built-in. Modulated basis function coefficients, area integration, peak heights, and  
-       ratios wrt a metabolite, or combination of metabolites, of choice are produced automatically.      
-    6. Template config files can be used to generate spectra that match those in the publication. An additional DL template is
-       included and is based on my experience. For instance, all (non-creatine) parameters have a 20% chance of being omitted. In
-       my work, this has helped DL models better learn the parameter representations by showing what a sample looks like when the 
-       parameter is missing. Additionally, uniform distributions are sampled to present more balanced classes to the networks.
+       corresponding parameters are the actual correction values you would need to fit the spectra with a standard 
+       pipeline.
+    3. This model aims to always incorporate as many degrees of freedom as possible. The standard variables include 
+       amplitudes, Lorentzian and Gaussian lineshapes, (naive) metabolite-level frequency shifts, global frequency 
+       shifts, noise, zero- and first-order phase offsets, first-order eddy currents, and baseline signal 
+       contributions. Non-standard variables include: residual water contribution, B0 inhomogeneities, and coil 
+       artifacts such as phase unalignment, frequency unalignment, sampled coil SNR values, and sampled coil 
+       sensitivities. As more improvements to spectral fitting are discovered, they can be added to the model.
+    4. On top of a rich baseline modeling, MM/Lip and residual water will be included. Fat/Lip peaks often have a 
+       different frequency shift than the water components because they are less sensitive to temperature changes. 
+       Therefore, different frequency shifts are applied to the two groups. MM/Lip signal contributions are included 
+       via basis functions from Osprey.
+    5. A variety of quantification methods are built-in. Modulated basis function coefficients, area integration, 
+       peak heights, and ratios wrt a metabolite, or combination of metabolites, of choice are produced automatically.      
+    6. Template config files can be used to generate spectra that match those in the publication. An additional DL 
+       template is included and is based on my experience. For instance, all (non-creatine) parameters have a 20% 
+       chance of being omitted. In my work, this has helped DL models better learn the parameter representations by 
+       showing what a sample looks like when the parameter is missing. Additionally, uniform distributions are 
+       sampled to present more balanced classes to the networks.
 
 # Examples from the manuscript
 The code and output files used to generate the samples for the manuscript are currently being added. Sample simulations are being added to the images folder.  
