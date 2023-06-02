@@ -817,21 +817,11 @@ class PhysicsModel(nn.Module):
         # dim=5: editing & transients ::           [bS, edit, transients, channels, length]
         # output.shape: [bS, ON/OFF, [noisy, noiseless], transients, channels, length]
         '''
-        # e = torch.distributions.normal.Normal(0,std_dev)
-        # e = e.sample([fid.shape[-1]])
-        # # print('e.shape {}'.format(e.shape))
-        # e = torch.movedim(e,0,-1)
-        # # print('e.shape {}'.format(e.shape))
 
-        # e = torch.movedim(torch.distributions.normal.Normal(0,std_dev).sample([fid.shape[-1]]),0,-1)
-        # print('std_dev.shape {}'.format(std_dev.shape))
-        # e = torch.movedim(torch.distributions.normal.Normal(0,torch.ones_like(std_dev)).sample([fid.shape[-1]]),0,-1)
         e = torch.distributions.normal.Normal(0,torch.ones_like(std_dev)).sample([fid.shape[-1]])
-        # print('e.shape: ',e.shape)
         e = torch.movedim(e,0,-1)
-        # print('e.shape: ',e.shape)
         e = rFourier_Transform(e) if not uncorrelated else Fourier_Transform(e)
-        # print('e.shape: ',e.shape)
+
         mn = e.mean(dim=-1, keepdims=True)
         std = e.std(dim=-1, keepdims=True)
         std[std==0] += 1e-6
@@ -868,17 +858,8 @@ class PhysicsModel(nn.Module):
         #     # print('refinement round {}'.format(cnt))
         #     e0 = HilbertTransform(self.refine_noise(fid_shape=fid.shape[-1], ind=ind, lin_snr=lin_snr, mx_val=max_val, std_dev=std_dev, e=e))
 
-        # if uncorrelated:
-        #     return inv_Fourier_Transform(e)
 
-        # # return inv_Fourier_Transform(HilbertTransform(e))
-        # e = inv_Fourier_Transform(HilbertTransform(e))
-        # # print('e.shape: ',e.shape)
-        # return e
-        # return inv_Fourier_Transform(e)
-        e = inv_Fourier_Transform(e)
-        # print('isnan test: ',torch.isnan(e).any())
-        return e, d
+        return inv_Fourier_Transform(e), d
 
     def refine_noise(self,
                      fid_shape, # fid.shape[-1]
@@ -909,27 +890,14 @@ class PhysicsModel(nn.Module):
         """
         l = len(self._metab) - self.MM if self.MM else len(self._metab)
         index = [self.index[m.lower()] for m in wrt_metab.split(',')]
-        #    [self.index['pcr']]
-        # try: index.append(self.index['cr'])
-        # except KeyError as E: pass
-
+        
         mx_values = torch.amax(
-            Fourier_Transform(fid)[...,tuple(index),0,:].unsqueeze(-2).sum(dim=-3, 
-                keepdims=True), dim=-1, keepdims=True)
-        if not mm:
-            fidSum = fid.sum(dim=-3) 
-            spectral_fit = fidSum.clone()
-            # mx_values = torch.amax(
-            #     Fourier_Transform(fid)[...,0,:].unsqueeze(-2).sum(dim=-3, 
-            #         keepdims=True), dim=-1, keepdims=True) 
-        else:
-            mm = fid[...,l:,:,:].sum(dim=-3)
-            fidSum = fid[...,0:l,:,:].sum(dim=-3)
-            spectral_fit = fidSum.clone()
-            # mx_values = torch.amax(
-            #     Fourier_Transform(fidSum)[...,0,:].unsqueeze(-2), dim=-1, 
-            #     keepdims=True) 
-            fidSum += mm
+            Fourier_Transform(fid)[...,tuple(index),0,:].unsqueeze(-2).sum(dim=-3), 
+                dim=-1, keepdims=True)
+        
+        fidSum = fid.sum(dim=-3) 
+        spectral_fit = fidSum.clone()
+        
         for _ in range(mx_values.ndim - fidSum.ndim): mx_values = mx_values.squeeze(-1)
         return fidSum, spectral_fit, mx_values
     

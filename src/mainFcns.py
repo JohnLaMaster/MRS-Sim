@@ -5,10 +5,10 @@ import os
 from collections import OrderedDict
 
 import numpy as np
+from NIfTI-MRS import Mat2NIfTI_MRS
 from physics_model import PhysicsModel
 from scipy.io import savemat as io_savemat
 from types import SimpleNamespace
-
 
 __all__ = ['prepare', '_save', 'simulate']
 
@@ -95,6 +95,7 @@ def _save(path: str,
             }
     io_savemat(path + '.mat', do_compression=True, mdict=mdict)
     print(path + '.mat')
+    return path + '.mat'
 
 
 
@@ -107,6 +108,8 @@ def simulate(inputs, args=None):
     step = args.stepSize
     threshold = args.batchSize
     path = args.savedir + '/dataset_spectra'
+    if config.NIfTIMRS: 
+        save2nifti = Mat2NIfTI_MRS(combine_complex=True, test_output=True)
     counter = 0
     for i in range(0,config.totalEntries,step):
         n = i+step if i+step<=params.shape[0] else i+(params.shape[0])
@@ -149,28 +152,32 @@ def simulate(inputs, args=None):
             parameters = np.concatenate([parameters, outputs[4]], axis=0)
             quantities = concat_dict(quantities, outputs[5])
         if config.totalEntries>threshold and (i+step) % threshold==0:
-            _save(path=path + '_{}'.format(counter), 
-                  spectra=spectra, 
-                  fits=fit,
-                  baselines=baseline, 
-                  reswater=reswater, 
-                  parameters=sort_parameters(parameters, ind), 
-                  quantities=quantities, 
-                  cropRange=pm.cropRange, 
-                  ppm=ppm,
-                  header=config.header)
+            new_path = _save(path=path + '_{}'.format(counter), 
+                             spectra=spectra, 
+                             fits=fit,
+                             baselines=baseline, 
+                             reswater=reswater, 
+                             parameters=sort_parameters(parameters, ind), 
+                             quantities=quantities, 
+                             cropRange=pm.cropRange, 
+                             ppm=ppm,
+                             header=config.header)
+            if config.NIfTIMRS:
+                save2nifti(datapath=new_path)
             first = True
             counter += 1
             print('>>> ** {} ** <<<'.format(counter))
         elif ((i+step) >= params.shape[0]) or (config.totalEntries<=threshold):
-            _save(path=path + '_{}'.format(counter), 
-                  spectra=spectra, 
-                  fits=fit,
-                  baselines=baseline, 
-                  reswater=reswater, 
-                  parameters=sort_parameters(parameters, ind), 
-                  quantities=quantities, 
-                  cropRange=pm.cropRange, 
-                  ppm=ppm,
-                  header=config.header)
+            new_path = _save(path=path + '_{}'.format(counter), 
+                             spectra=spectra, 
+                             fits=fit,
+                             baselines=baseline, 
+                             reswater=reswater, 
+                             parameters=sort_parameters(parameters, ind), 
+                             quantities=quantities, 
+                             cropRange=pm.cropRange, 
+                             ppm=ppm,
+                             header=config.header)
+            if config.NIfTIMRS:
+                save2nifti(datapath=new_path)
         del spectra, fit, baseline, reswater, parameters, quantities
