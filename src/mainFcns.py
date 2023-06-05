@@ -45,7 +45,9 @@ def prepare(config_file):
                   num_coils=config.num_coils,
                   ppm_ref=config.ppm_ref,
                   spectral_resolution=config.spectral_resolution,
-                  spectralwidth=config.spectralwidth)
+                  spectralwidth=config.spectralwidth,
+                  snr_metab=config.snr_metab,
+                  wrt_metab=config.wrt_metab)
     config.header = pm.header
 
     # print(pm.index)
