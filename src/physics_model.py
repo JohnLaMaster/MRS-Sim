@@ -103,7 +103,8 @@ class PhysicsModel(nn.Module):
                    ppm_ref: float=4.65,
                    spectral_resolution: list=[10.0, 10.0, 10.0], # mm
                    spectralwidth=None,
-                   snr_metab: str='PCr',
+                   wrt_metab: str='PCr', 
+                   snr_metab: str=None,
                   ) -> tuple:
         # # Sort metabs and group met vs mm/lip
         self._metab, l, self.MM = self.order_metab(metab)
@@ -114,6 +115,8 @@ class PhysicsModel(nn.Module):
                                                       self._ppm.max()]
         self.t = self.t.unsqueeze(-1).float().squeeze().unsqueeze(0)
         self._basis_metab = []
+        self.wrt_metab = wrt_metab
+        self.snr_metab = snr_metab is not isinstance(snr_metab, type(None)) else wrt_metab
 
         # Add metabolite names to dictionary
         dct = OrderedDict()
@@ -123,69 +126,21 @@ class PhysicsModel(nn.Module):
         assert(m.lower() in list(self.basisFcns['metabolites'].keys()) for \
                 m in self._metab)
 
+
         # # Compile the selected basis functions
         self.syn_basis_fids = torch.stack([torch.as_tensor(
             self.basisFcns['metabolites'][m.lower()]['fid'], 
             dtype=torch.float32) for m in self._metab], dim=0).unsqueeze(0)
+        num_lines = num_bF
+        if self.syn_basis_fids.ndim==5:
+            num_lines *= self.syn_basis_fids.shape[-3]
 
-#         # # Resample basis functions to match simulation parameters
-#         if not isinstance(spectralwidth, type(None)):
-#             # If the spectral bandwidth is different from the basis set, f
-#             self.spectralwidth = torch.as_tensor(spectralwidth)
-#             target_range = [-0.5*spectralwidth / self.carrier_frequency, 
-#                             0.5*spectralwidth / self.carrier_frequency] + self.ppm_ref
-#             t = 1 / spectralwidth * basisFcn_len # max t value
-#         else:
-#             target_range = [self._ppm.min(), self._ppm.max()]
-#             t = self.t.max() # 1 / self.spectralwidth * basisFcn_len #  
 
-        # Resample the basis functions, ppm, and t to the desired resolution
-        target_range = [[self.t.min(), self.t.max()],
-                        [self._ppm.min(), self._ppm.max()]]
-        # print('target_range: ',target_range)
-        # print('basisFcn_len: ',basisFcn_len)
-        # print('self.syn_basis_fids.shape {}'.format(self.syn_basis_fids.shape))
-        # chint = CubicHermiteInterp(xaxis=self.t, signal=self.syn_basis_fids)
-        # self.syn_basis_fids = chint.interp(torch.linspace(self.t.min(), self.t.max(),basisFcn_len))
-        # self.syn_basis_fids = self.resample_(signal=self.syn_basis_fids, 
-        #                                      ppm=self.t,
-        #                                      length=2048,#basisFcn_len,
-        #                                      target_range=target_range[0],
-        #                                      flip=False)
-        """
-        Things work when self.resample_(syn_basis_fids, length=8192), self.t(len=8192) and self._ppm(len=8192)
-        but not when length=basisFcn_len
-        """
-        # print('self.syn_basis_fids.shape {}'.format(self.syn_basis_fids.shape))
-        # self.syn_basis_fids = inv_Fourier_Transform(self.resample_(signal=Fourier_Transform(
-        #                                                             self.syn_basis_fids),
-        #                                        ppm=self._ppm,
-        #                                        length=basisFcn_len,
-        #                                        target_range=target_range[1]
-        #                                        )
-        #                                             )
-        # self._ppm = torch.linspace(target_range[1][0], target_range[1][1], basisFcn_len).unsqueeze(0)#
-                                   # basisFcn_len).unsqueeze(0)# + ppm_ref
-        # # self._ppm /= (self.B0 * self.carrier_frequency)
-        # self.t = torch.linspace(self.t.min(), self.t.max(), basisFcn_len).unsqueeze(0)#basisFcn_len).unsqueeze(0)
-        # print('min(self._ppm): {}, max(self._ppm): {}'.format(self._ppm.min(),self._ppm.max()))
-        # print('min(self.t): {}, max(self.t): {}'.format(self.t.min(),self.t.max()))
+        if self.linewidth==0:
+            lw = 1 - self.linewidth
+            broaden = torch.exp(-lw*self.t).unsqueeze(-2).unsqueeze(0)
+            self.syn_basis_fids *= broaden.expand_as(self.syn_basis_fids)
 
-        #self.syn_basis_fids = self.syn_basis_fids * torch.exp(-1*t).unsqueeze(0).unsqueeze(0)
-        # print(self.syn_basis_fids.shape, torch.exp(-1*self.t).shape)
-        # test = torch.stack([torch.exp(-1*self.t),torch.ones_like(self.t)],dim=1).unsqueeze(0)
-        # print('test.shape: ',test.shape)
-        lw = 1 - self.linewidth if self.linewidth==0 else 0
-        self.syn_basis_fids *= torch.exp(-lw*self.t).unsqueeze(-2).unsqueeze(0).expand_as(self.syn_basis_fids)
-        # self.syn_basis_fids = self.syn_basis_fids * torch.stack([torch.exp(-lw*self.t),
-        #                                                          torch.exp(-lw*self.t)],
-        #                                                         dim=-2).unsqueeze(0).expand_as(self.syn_basis_fids)
-        # X =  torch.stack([torch.exp(-lw*self.t), torch.exp(-lw*self.t)], dim=-2).unsqueeze(0)
-        # print('X.shape ', X.shape )
-        # X = X.expand_as(self.syn_basis_fids)
-        # print('self.syn_basis_fids.shape {}, X.shape {}'.format(self.syn_basis_fids.shape, X.shape))
-        # self.syn_basis_fids *= X
-        # # print(self.syn_basis_fids.shape)
 
         if difference_editing:
             self.difference_editing_fids = self.syn_basis_fids.clone()
@@ -204,51 +159,28 @@ class PhysicsModel(nn.Module):
         self.register_buffer('ppm_cropped', torch.fliplr(torch.linspace(
                             float(self.cropRange[0]), float(self.cropRange[1]), 
                             length).unsqueeze(0)))
-        # self.register_buffer('ppm_cropped', torch.linspace(
-        #                     float(self.cropRange[0]), float(self.cropRange[1]), 
-        #                     length).unsqueeze(0))
+
         self.spectral_resolution = spectral_resolution
         self.image_resolution = image_resolution
-        # print('ppm_cropped: ',self.ppm_cropped.min(), self.ppm_cropped.max())
     
         # Define the first-order phase reference in the time-domain
         '''
-        bandwidth = 1/dwelltime # Hz
-        carrier_freq = 127.8 # MHz
-        freq_ref = 4.68 * carrier_freq * 10e6 # Hz  ## / 10e6
-        degree = 2*pi*bandwidth*(1/(bandwidth + freq_ref))
-        
-        freq_ref = ppm_ref * self.carrier_freq / 10e6
-        phi1_ref = 2*self.PI*self.spectralwidth * (torch.linspace(-0.5*
-            self.spectralwidth, 0.5*self.spectralwidth, self.l) + freq_ref)
-
-        0.5*PI*Hz = 1 rad/s
-        deg * 2*PI = rad
-
-        freq_ref = (self._ppm - ppm_ref) * gamma_p * B0
-        time_ref = 1 / freq_ref
-        phase[radians] = f[Hz] * timeshift[s] * 2 * PI
-                       = (f[Hz] * 2 * PI) * timeshift[deg] 
-                       deg * 2 * PI = radians
-                       (Hz = 1 / s) * (s)
-
-
         ph1 = ph1 * pi/180 # convert from deg/ppm to rad/ppm
         correction: specs .* exp(1j(ph1*(_ppm-ppm_ref)))
         artifact: specs .* exp(-1j(ph1*(_ppm-ppm_ref)))
         '''        
-        # freq_ref = (self._ppm - ppm_ref) * self.carrier_frequency * 10e6
         phi1_ref = self._ppm - ppm_ref
         self.register_buffer('phi1_ref', torch.as_tensor(phi1_ref, 
                              dtype=torch.float32).squeeze())
 
         ### Define the index used to specify the variables in the forward pass 
         # # and in the sampling code
-        num_bF = l+self.MM if self.MM else l
-        header, cnt = self._metab, counter(start=int(3*num_bF)-1)
+        num_bF = l + self.MM if self.MM else l
+        header, cnt = self._metab, counter(start=int(3 * num_bF) - 1)
         g = 1 if not self.MM else 2
         names = ['d',   'dmm', 'g',   'gmm', 'fshift', 'snr', 'phi0', 'phi1']
         mult  = [  l, self.MM,   l, self.MM,        1,     1,      1,      1] 
+
 
         # Should be a global fshift then individual metabolites 
         # and MM/Lip fsfhitfs
@@ -269,7 +201,6 @@ class PhysicsModel(nn.Module):
         self.define_parameter_ranges(header=header)
 
 
-
         self.totals = []
         for i in range(num_bF):
             self.totals.append(1)
@@ -283,8 +214,8 @@ class PhysicsModel(nn.Module):
         ind.append(tuple(int(x) for x in torch.arange(0,num_bF) + 2*num_bF)) 
 
         # # Frequency Shift
-        ind.append(cnt(1))                               # Global fshift
-        ind.append(tuple(cnt(1) for _ in range(num_bF))) # Individual fshifts
+        ind.append(cnt(1))                                  # Global fshift
+        ind.append(tuple(cnt(1) for _ in range(num_lines))) # Individual fshifts
         
         # # Noise
         ind.append(cnt(1)) # SNR
@@ -392,9 +323,7 @@ class PhysicsModel(nn.Module):
         needed for each one.
         '''
         out, baselines, res_water = offsets
-        # print('max_val: ',max_val.squeeze())
-        # print('max_base: ',baselines.shape,torch.max(baselines).squeeze(), torch.min(baselines).squeeze())
-        scale = max_val#10**(OrderOfMagnitude(fid) - OrderOfMagnitude(out))
+        scale = max_val # 10**(OrderOfMagnitude(fid) - OrderOfMagnitude(out))
         out, ind = rand_omit(out, 0.0, drop_prob)
         offset = out.clone() * scale
 
@@ -405,9 +334,7 @@ class PhysicsModel(nn.Module):
             res_water *= scale
             if drop_prob: res_water[ind,...] = 0.0
         if not isinstance(out, int):# == 0: meaning offsets were not included
-            # fid += inv_Fourier_Transform(out*scale)
             fid = inv_Fourier_Transform(Fourier_Transform(fid) + out*scale)
-
 
         return fid, {'baselines':      baselines, 
                      'residual_water': res_water, 
@@ -430,35 +357,22 @@ class PhysicsModel(nn.Module):
         Simulate baseline offsets
         '''
         cfg = SimpleNamespace(**config)
-        # print('start: ',torch.squeeze(cfg.start))
-        # print('end: ',torch.squeeze(cfg.end))
         baselines = batch_smooth(bounded_random_walk(cfg.start, cfg.end, 
                                                      cfg.std, cfg.lower_bnd, 
                                                      cfg.upper_bnd, 
                                                      cfg.length), 
                                  cfg.windows, 'constant')
 
-        # baselines, _ = self.normalize(signal=baselines, fid=False, denom=None, noisy=-3)
-
         trend = batch_linspace(baselines[...,0].unsqueeze(-1),
                                baselines[...,-1].unsqueeze(-1), 
                                cfg.length)
-        # print('trend.shape: {}, start: {}, stop: {}'.format(trend.shape,baselines[...,0].squeeze(),
-        #                        baselines[...,-1].squeeze()))
         baselines = baselines - trend
-        # # print('def baselines:: baselines.shape ',baselines.shape)
+
         baselines, _ = self.normalize(signal=baselines, fid=False, denom=None, noisy=-3)
 
         if cfg.rand_omit>0: 
             baselines, _ = rand_omit(baselines, 0.0, cfg.rand_omit)
 
-        # print(type(baselines), type(config['scale']))
-
-        """
-        TODO for Tuesday:
-        figure out why the baselines form a giant U shape from end to end
-        - It's the Hilbert Transform! Not sure why it does that though
-        """
 
         # Convert simulated residual water from local to clinical range before 
         # Hilbert transform makes the imaginary component. Then resample 
@@ -468,7 +382,7 @@ class PhysicsModel(nn.Module):
         # original = batch_linspace(start=cfg.start, stop=cfg.end, steps=baselines.shape[-1])
         # # print(baselines.shape,original.shape)
         # # print('isnan test: ',torch.isnan(baselines).any())
-        # a = self.sim2acquired(baselines * config['scale'], 
+        # a = sim2acquired(baselines * config['scale'], 
         #                                   [cfg.start, cfg.end],
         #                                   self.ppm)
         # # print('isnan test: ',torch.isnan(a).any())
@@ -476,15 +390,15 @@ class PhysicsModel(nn.Module):
         # # print('isnan test: ',torch.isnan(a).any())
         # raw_baseline = a
         # raw_baseline = HilbertTransform(
-        #                 self.sim2acquired(baselines * config['scale'], 
+        #                 sim2acquired(baselines * config['scale'], 
         #                                   [cfg.start, cfg.end],
         #                                   self.ppm)
         #                )
         # print('baselines.shape: {}'.format(baselines.shape))
-        cropRange = [torch.as_tensor(val).unsqueeze(-1) for val in cfg.cropRange]
-        raw_baseline = self.sim2acquired(baselines * config['scale'], 
-                                         [cropRange[0], cropRange[1]],
-                                         self.ppm)
+        ppm_range = [torch.as_tensor(val).unsqueeze(-1) for val in cfg.ppm_range]
+        raw_baseline = sim2acquired(baselines * config['scale'], 
+                                    [ppm_range[0], ppm_range[1]],
+                                    self.ppm)
         # print('min: {}, max: {}'.format(raw_baseline.min().squeeze(), raw_baseline.max().squeeze()))
         # raw_baseline = Fourier_Transform(rinv_Fourier_Transform(raw_baseline))
         # print('raw_baseline.shape: {}'.format(raw_baseline.shape))
@@ -572,22 +486,6 @@ class PhysicsModel(nn.Module):
         # Eqn 4 in Ningzhi Li 2015, "Spectral fitting using basis set..."
         return out
 
-        # # output.shape = [bS, length, length, length]
-        # # print('dB0.shape: {}'.format(dB0.shape))
-        # dB0 = dB0.unsqueeze(1).flatten(start_dim=2, end_dim=-1).unsqueeze(-1)
-        # # output.shape = [bS, 1, length^3, 1] * [1, 1, 1, 8192] 
-        # #                => [bS, 1, length^3, 8192]
-        # # print('dB0.shape: {}; t.shape: {}'.format(dB0.shape,t.shape))
-        # dB0 = dB0 * t
-
-        # identity = torch.ones_like(t).repeat(1,1,2,1)
-
-        # # Eqn 4 in Ningzhi Li 2015, "Spectral fitting using basis set..."
-        # out = complex_exp(identity,
-        #                    -1*dB0.unsqueeze(-2).deg2rad()).sum(dim=-3)
-        # # print('out.shape: {}'.format(out.shape))
-        # return out
-
 
     def coil_freq_drift(self,
                         fid: torch.Tensor,
@@ -644,7 +542,7 @@ class PhysicsModel(nn.Module):
             # => [bS, [[ON/OFF], [noisy/noiseless]], transients, 
             #     channels, weights]
             coil_sens = coil_sens.unsqueeze(-1)
-        # print('fid.shape {}, coil_sens.shape {}'.format(fid.shape,coil_sens.shape))
+
         return fid * coil_sens.expand_as(fid)
 
 
@@ -681,7 +579,6 @@ class PhysicsModel(nn.Module):
         a = -1*f_mod*t*2*PI
 
         return complex_exp(fid, -1*f_mod*t*2*PI)
-        # print('f_mod.shape: {}, (-1*f_mod*t*2*PI).shape: {}'.format(f_mod.shape,a.shape))
 
 
     def first_order_phase(self, 
@@ -703,18 +600,6 @@ class PhysicsModel(nn.Module):
                     complex_exp(Fourier_Transform(fid), 
                                 (-1*self.phi1_ref*phi.deg2rad()))
             )
-# ================================================================================
-        # # return inv_Fourier_Transform(complex_exp(torch.ones_like(fid),
-        # #         self._ppm*phi1)) * fid
-
-        # return inv_Fourier_Transform(
-        #     Fourier_Transform(fid)*complex_exp(torch.ones_like(fid),
-        #         self._ppm*phi1)
-        #     )
-
-        # # return complex_exp(fid, -1*(phi1*self.phi1_ref.pow(-1))/360)
-
-        # # return complex_exp(fid, -1*(phi1 + self.phi1_ref).deg2rad())
 
         
     def frequency_shift(self, 
@@ -734,11 +619,7 @@ class PhysicsModel(nn.Module):
             
         for _ in range(fid.ndim - param.ndim): param = param.unsqueeze(-1)
         for _ in range(fid.ndim - t.ndim): t = t.unsqueeze(0)
-        # print('frequency_shift:: fid.shape {}, param.shape {}, t.shape {}'.format(fid.shape, param.shape, t.shape))
         f_shift = param.mul(t).expand_as(fid)
-        # f_shift = param.mul(t)
-        # print('f_shift.shape: ',f_shift.shape)
-        # f_shift = f_shift.expand_as(fid)
         
         return complex_exp(fid, f_shift)
         
@@ -772,11 +653,10 @@ class PhysicsModel(nn.Module):
 
 
         '''
+        # Set variables in case of multicoil transients
         zeros, d = torch.where(zeros<=0.0,1,0).sum(dim=-1,keepdims=True), -4
         if transients.ndim==1: zeros, transients, d = None, None, -3
 
-        # print('generate_noise')
-        # print('fid.shape {}, param.shape {}, max_val.shape {}'.format(fid.shape, param.shape, max_val.shape))
         for _ in range(fid.ndim-max_val.ndim): max_val = max_val.unsqueeze(-1)
         for _ in range(fid.ndim-param.ndim): param = param.unsqueeze(-1)
 
@@ -801,13 +681,11 @@ class PhysicsModel(nn.Module):
             if std_dev.shape[-2]==1: std_dev = std_dev.squeeze(-2)
             elif std_dev.shape[-1]==1: std_dev = std_dev.squeeze(-1)
         if isinstance(transients, type(None)): std_dev = std_dev.squeeze(-2)
-        # print('std_dev.shape {}'.format(std_dev.shape))
         
         if uncorrelated: 
             # Quadrature coils where real/phase are recorded separately
             # Separate coils ==> uncorrelated noise for real/phase channels
             std_dev = std_dev.repeat_interleave(repeats=2,dim=-1)
-            # print('std_dev.shape: ',std_dev.shape)
 
         '''
         Notes:
@@ -826,38 +704,6 @@ class PhysicsModel(nn.Module):
         std = e.std(dim=-1, keepdims=True)
         std[std==0] += 1e-6
         e = (e - mn).div(std).mul(std_dev.unsqueeze(-1))
-        # print('isnan test: ',torch.isnan(e).any())
-        # # print('e.shape: ',e.shape)
-        # # e = e.mul(std_dev.unsqueeze(-1))
-        # # print('e.shape: ',e.shape)
-        # test = True
-        # cnt = -1
-        # # threshold = 0.05
-        # # while test:
-        # #     cnt += 1
-        # #     print('refinement round {}'.format(cnt))
-        # #     check0 = (max_val/e.std(dim=-1, keepdims=True)>=(1-threshold)*lin_snr)
-        # #     check1 = (max_val/e.std(dim=-1, keepdims=True)<=(1+threshold)*lin_snr)
-        # #     ind = torch.where(check0 | check1, 0, 1)
-        # #     # ind = torch.where((e.std(dim=-1, keepdims=True)>=(1-threshold)*std_dev) | (e.std(dim=-1, keepdims=True)<=(1+threshold)*std_dev),0,1)
-        # #     if not (ind==1).any(): test = False
-        # #     e = self.refine_noise(fid_shape=fid.shape[-1], ind=ind, lin_snr=lin_snr, mx_val=max_val, std_dev=std_dev, e=e)
-        # threshold = 0.1
-        # e0 = HilbertTransform(e)
-        # while test:
-        #     cnt += 1
-        #     # print('refinement round {}'.format(cnt))
-        #     new_snr = max_val/e0.std(dim=-1, keepdims=True)
-        #     ind = torch.where(new_snr>=(lin_snr-threshold),   0, 1)
-        #     ind = torch.where(new_snr<=(lin_snr+threshold), ind, 1)
-        #     # print('lin_snr: {}, new_snr: {}'.format(lin_snr,new_snr))
-        #     # ind = torch.where(check0 and check1, 0, 1)
-        #     # print(ind)
-        #     # ind = torch.where((e.std(dim=-1, keepdims=True)>=(1-threshold)*std_dev) | (e.std(dim=-1, keepdims=True)<=(1+threshold)*std_dev),0,1)
-        #     if not (ind==1).any(): test = False
-        #     # print('refinement round {}'.format(cnt))
-        #     e0 = HilbertTransform(self.refine_noise(fid_shape=fid.shape[-1], ind=ind, lin_snr=lin_snr, mx_val=max_val, std_dev=std_dev, e=e))
-
 
         return inv_Fourier_Transform(e), d
 
@@ -868,8 +714,9 @@ class PhysicsModel(nn.Module):
                      mx_val: torch.Tensor,
                      std_dev: torch.Tensor,
                      e: torch.Tensor) -> torch.Tensor:
-        # ind = torch.where(((e.std(dim=-1, keepdims=True)>=0.95*std_dev) and (e.std(dim=-1, keepdims=True)<=1.05*std_dev)),0,1)
-        # if (ind==1).any():
+        '''
+        Used in developing self.generate_noise to ensure the desired SNR is being simulated.
+        '''
         e0  = torch.movedim(torch.distributions.normal.Normal(0,torch.ones_like(std_dev)).sample([fid_shape]),0,-1)
         mn  = e0.mean(dim=-1, keepdims=True)
         std = e0.std(dim=-1, keepdims=True)
@@ -882,14 +729,14 @@ class PhysicsModel(nn.Module):
                      fid: torch.Tensor,
                      params: torch.Tensor,
                      mm: int,
-                     wrt_metab: str,
+                     # wrt_metab: str,
                     ) -> tuple:
         """
-        This top part uses creatine for the SNR calculations. The bottoms parts that have
-        been commented out use the max of the real components.
+        Combine the modulated metabolites into a single FID.
+        mx_values is calculated for the snr_metab, and defaults to wrt_metab if not specified.
         """
         l = len(self._metab) - self.MM if self.MM else len(self._metab)
-        index = [self.index[m.lower()] for m in wrt_metab.split(',')]
+        index = [self.index[m.lower()] for m in self.snr_metab.split(',')]
         
         mx_values = torch.amax(
             Fourier_Transform(fid)[...,tuple(index),0,:].unsqueeze(-2).sum(dim=-3), 
@@ -899,6 +746,7 @@ class PhysicsModel(nn.Module):
         spectral_fit = fidSum.clone()
         
         for _ in range(mx_values.ndim - fidSum.ndim): mx_values = mx_values.squeeze(-1)
+        
         return fidSum, spectral_fit, mx_values
     
 
@@ -951,16 +799,10 @@ class PhysicsModel(nn.Module):
         In a Voigt lineshape model, each basis line has its own Lorentzian 
         value. Fat- and Water-based peaks use one Gaussian value per group.
         '''
-        # t = self.t.clone().t().unsqueeze(0)
-        t = self.t.clone().unsqueeze(0)#.unsqueeze(0)
+        t = self.t.clone().unsqueeze(0)
         d = d.unsqueeze(-1).unsqueeze(-1).repeat(1,1,2,1)
         g = g.unsqueeze(-1).unsqueeze(-1).expand_as(d)
         if d.dtype==torch.float64: d = d.float()
-        # print('lineshape_voigt:: t.shape {}, d.shape {}, g.shape {}'.format(t.shape, d.shape, g.shape))
-        # a = g*t.unsqueeze(0)
-        # b = (-d - a) * t.unsqueeze(0)
-        # c = torch.exp(b)
-        # print(a.shape, b.shape, c.shape)
         
         return fid * torch.exp((-d - g * t.unsqueeze(0)) * t.unsqueeze(0))
 
@@ -1131,11 +973,6 @@ class PhysicsModel(nn.Module):
         return params
 
 
-        # self.syn_basis_fids = self.resample_(signal=self.syn_basis_fids, 
-        #                                      ppm=self.t,
-        #                                      length=2048,#basisFcn_len,
-        #                                      target_range=target_range[0],
-        #                                      flip=False)
     def resample_(self, 
                   signal: torch.Tensor, 
                   ppm: torch.Tensor=None,
@@ -1159,26 +996,20 @@ class PhysicsModel(nn.Module):
         ppm = ppm if not isinstance(ppm, type(None)) else self.ppm
         ppm = ppm.unsqueeze(0).squeeze()
         if not (ppm[...,0]<ppm[...,-1]): 
-            # print('flipping ppm')
             ppm = torch.flip(ppm.unsqueeze(0), dims=[-1]).squeeze(0)
         
         if isinstance(target_range, type(None)): target_range = self.cropRange
-        # print('def resample_ target_range: ',target_range)
-        # print('ppm.amin() {}, ppm.amax() {}'.format(ppm.amin(),ppm.amax()))
         new = torch.linspace(start=target_range[0], end=target_range[1], 
                              steps=int(length)).to(signal.device)
-        # print('new[0] {}, new[-1] {}, len {}'.format(new[0],new[-1], int(length)))
         for i in range(signal.ndim - new.ndim): new = new.unsqueeze(0)
 
         if flip: 
-            # print('flipping')
             signal = torch.flip(signal, dims=[-1])
 
         chs_interp = CubicHermiteInterp(ppm, signal)
         signal = chs_interp.interp(new)
 
         if flip: 
-            # print('flipping')
             return torch.flip(signal, dims=[-1])
 
         return signal
@@ -1189,11 +1020,10 @@ class PhysicsModel(nn.Module):
                       ) -> tuple():
         cfg = SimpleNamespace(**config)
 
-        start_prime = cfg.cropRange_resWater[0] + cfg.start_prime
-        end_prime   = cfg.cropRange_resWater[1] -   cfg.end_prime
+        start_prime = cfg.ppm_range[0] + cfg.start_prime
+        end_prime   = cfg.ppm_range[1] -   cfg.end_prime
         ppm = batch_linspace(start=start_prime, stop=end_prime, 
                              steps=int(cfg.length))
-        # print(cfg.lower_bnd)
         res_water = batch_smooth(bounded_random_walk(cfg.start, cfg.end, 
                                                      cfg.std, -1*cfg.lower_bnd, 
                                                      cfg.upper_bnd, 
@@ -1211,27 +1041,22 @@ class PhysicsModel(nn.Module):
         # Convert simulated residual water from local to clinical range before 
         # Hilbert transform makes the imaginary component. Then resample 
         # acquired range to cropped range.
-        # print(type(res_water), type(config['scale']))
         raw_res_water = HilbertTransform(
-                        self.sim2acquired(res_water * config['scale'], 
+                        sim2acquired(res_water * config['scale'], 
                                           [start_prime, 
                                            end_prime], self.ppm)
                         )
-        ch_interp = CubicHermiteInterp(xaxis=self.ppm, signal=raw_res_water)
-        res_water = ch_interp.interp(xs=self.ppm_cropped)
+        # ch_interp = CubicHermiteInterp(xaxis=self.ppm, signal=raw_res_water)
+        # res_water = ch_interp.interp(xs=self.ppm_cropped)
 
-        # return res_water, raw_res_water
         return raw_res_water, raw_res_water   # raw_res_water is flat on the tails
 
 
     def set_parameter_constraints(self, cfg: dict):
         cfg_keys = [k.lower() for k in cfg.keys()]
-        # print(cfg_keys)
-        # print(self._index)
 
         for k, ind in self._index.items():
             if k in cfg_keys:
-                # print(k)
                 if isinstance(ind, tuple):
                     for i in ind:
                         self.min_ranges[:,i] = cfg[k][0]
@@ -1251,9 +1076,6 @@ class PhysicsModel(nn.Module):
             print('>>>>> Baselines')
             baselines, raw_baselines = self.baselines(baselines)
             out += raw_baselines.clone()
-
-            # out += baselines.clone()
-            # print('line 990 raw_baselines.shape ',raw_baselines.shape)
         else: 
             baselines, raw_baselines = None, None
 
@@ -1265,69 +1087,6 @@ class PhysicsModel(nn.Module):
             res_water, raw_res_water = None, None
 
         return out, baselines, res_water
-        # return out, raw_baselines, raw_res_water
-        # return (raw_baselines, raw_res_water), baselines, res_water
-
-
-    def sim2acquired(self, 
-                     line: torch.Tensor, 
-                     sim_range: list, 
-                     target_ppm: torch.Tensor,
-                    ) -> torch.Tensor:
-        '''
-        This approach uses nonuniform sampling density to reduce the memory 
-        footprint. This is possible because the tails being padded are always 
-        zero. Having 10e1 or 10e10 zeros gives the same result. So, small tails 
-        are padded to the input, 
-        '''
-        raw_ppm = [target_ppm.amin(), target_ppm.amax()]
-        if target_ppm.amin(keepdims=True)[0]!=line.shape[0]: 
-            raw_ppm = [raw_ppm[0].repeat(line.shape[0]), 
-                       raw_ppm[1].repeat(line.shape[0])]
-        if sim_range[0].shape[0]!=line.shape[0]: 
-            sim_range[0] = sim_range[0].repeat_interleave(line.shape[0], dim=0)
-        if sim_range[1].shape[0]!=line.shape[0]: 
-            sim_range[1] = sim_range[1].repeat_interleave(line.shape[0], dim=0)
-        for _ in range(3 - sim_range[0].ndim): 
-            sim_range[0] = sim_range[0].unsqueeze(-1)
-        for _ in range(3 - sim_range[1].ndim): 
-            sim_range[1] = sim_range[1].unsqueeze(-1)
-        for _ in range(3 - raw_ppm[0].ndim): 
-            raw_ppm[0] = raw_ppm[0].unsqueeze(-1)
-        for _ in range(3 - raw_ppm[1].ndim): 
-            raw_ppm[1] = raw_ppm[1].unsqueeze(-1)
-
-        pad = 1000 # number of points added to each side
-        pad_left, pad_right = 0, 0
-        # Middle side
-        xaxis = batch_linspace(sim_range[0], sim_range[1], int(line.shape[-1]))
-
-        # Left side
-        if (raw_ppm[0]<sim_range[0]).all():
-            xaxis = torch.cat([batch_linspace(raw_ppm[0], sim_range[0], 
-                                              pad+1)[...,:-1], 
-                               xaxis], dim=-1) 
-            pad_left = pad
-        # Right side
-        if (raw_ppm[1]>sim_range[1]).all():
-            xaxis = torch.cat([xaxis, batch_linspace(sim_range[1], raw_ppm[1], 
-                                                     pad+1)[...,1:]], dim=-1) 
-            pad_right = pad
-
-        padding = tuple([pad_left, pad_right])
-        # print('line.shape: {}, padding: {}'.format(line.shape, padding))
-        signal = torch.nn.functional.pad(input=line, pad=padding, 
-                                         mode="constant", value=0)
-        # print('signal.shape: ',signal.shape)
-        # print('sim2acquired')
-        signal = batch_smooth(x=signal, window_len=float(3.0/signal.shape[-1]))
-        # print('isnan(signal) test: ',torch.isnan(signal).any())
-        ch_interp = CubicHermiteInterp(xaxis=xaxis, signal=signal)
-        return ch_interp.interp(xs=target_ppm)
-        # out = ch_interp.interp(xs=target_ppm)
-        # # print('isnan test: ',torch.isnan(out).any())
-        # # print('out.shape: ',out.shape)
-        # return out
 
     
     def zero_fill(self,
@@ -1373,7 +1132,8 @@ class PhysicsModel(nn.Module):
                 magnitude: bool=True,
                 multicoil: bool=False,
                 snr_combo: str=False,
-                wrt_metab: str='cr',
+                # snr_metab: str=None, 
+                # wrt_metab: str='cr',
                 zero_fill: int=False,
                 broadening: bool=True,
                 coil_fshift: bool=False,
@@ -1464,8 +1224,7 @@ class PhysicsModel(nn.Module):
                                            param=params[:,self.index['snr']], 
                                            zeros=params[:,self.index['coil_sens']], # num of zeroed out coils
                                            transients=params[:,self.index['coil_snr']],
-                                           uncorrelated=True,
-                                           wrt_metab=wrt_metab)
+                                           uncorrelated=True)
             fidSum = torch.stack((fidSum.clone() + noise, fidSum), dim=d)
             spectral_fit = torch.stack((spectral_fit.clone() + noise, 
                                         spectral_fit), dim=d)

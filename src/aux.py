@@ -8,6 +8,7 @@ import scipy.io as io
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from src.interpolate import CubicHermiteMAkima as CubicHermiteInterp
 # from pm_v3 import PhysicsModel
 from torch.fft import fft, fftshift, ifft, ifftshift, irfft, rfft
 from types import SimpleNamespace
@@ -216,10 +217,10 @@ def inv_Fourier_Transform(signal: torch.Tensor,
     return signal.contiguous()
 
 
-def normalize(tensor: torch.Tensor, dims=list) -> torch.Tensor:
-    denom = torch.max(tensor, dim=dims, keepdims=True).values - \
-                torch.min(tensor, dim=dims, keepdims=True).values
-    return (tensor - torch.min(tensor.abs(), dim=dims, 
+def normalize_old(tensor: torch.Tensor, dims=tuple) -> torch.Tensor:
+    denom = torch.amax(tensor, dim=dims, keepdims=True).values - \
+                torch.amin(tensor, dim=dims, keepdims=True).values
+    return (tensor - torch.amin(tensor.abs(), dim=dims, 
                                 keepdims=True).values) / denom
 
 
@@ -233,19 +234,20 @@ def OrderOfMagnitude(data: torch.Tensor,
     return torch.floor(torch.log10(data+eps))
     
 
-def prepareConfig(cfg: dict, pt_density: int):
-    try: cfg['pt_density']
-    except: cfg['pt_density'] = pt_density
-    length = round((cfg['cropRange'][1]-cfg['cropRange'][0]) * \
+def prepareConfig(N: int, cfg: dict) -> dict:#, pt_density: int):
+    # try: cfg['pt_density']
+    # except: cfg['pt_density'] = pt_density
+    # print('N = ',N)
+    length = round((cfg['ppm_range'][1]-cfg['ppm_range'][0]) * \
                    cfg['pt_density'])
     if length % 2 != 0: length += 1
-    if len(cfg['start'])==1: cfg['start'] = [cfg['start'], cfg['start']]
-    if len(cfg['end'])==1: cfg['end'] = [cfg['end'], cfg['end']]
-    if len(cfg['std'])==1: cfg['std'] = [cfg['std'], cfg['std']]
-    if len(cfg['upper'])==1: cfg['upper'] = [cfg['upper'], cfg['upper']]
-    if len(cfg['lower'])==1: cfg['lower'] = [cfg['lower'], cfg['lower']]
-    if len(cfg['window'])==1: cfg['window'] = [cfg['window'], cfg['window']]
-    if len(cfg['scale'])==1: cfg['scale'] = [cfg['scale'], cfg['scale']]
+    if len(cfg['start'])==1: cfg['start'] = [cfg['start'][0], cfg['start'][0]]
+    if len(cfg['end'])==1: cfg['end'] = [cfg['end'][0], cfg['end'][0]]
+    if len(cfg['std'])==1: cfg['std'] = [cfg['std'][0], cfg['std'][0]]
+    if len(cfg['upper'])==1: cfg['upper'] = [cfg['upper'][0], cfg['upper'][0]]
+    if len(cfg['lower'])==1: cfg['lower'] = [cfg['lower'][0], cfg['lower'][0]]
+    if len(cfg['window'])==1: cfg['window'] = [cfg['window'][0], cfg['window'][0]]
+    if len(cfg['scale'])==1: cfg['scale'] = [cfg['scale'][0], cfg['scale'][0]]
 
     return {
         'start': torch.zeros(N,1,1).uniform_(cfg['start'][0],
@@ -261,7 +263,7 @@ def prepareConfig(cfg: dict, pt_density: int):
         'windows': torch.ones(N,1,1).uniform_(cfg['window'][0],
                                               cfg['window'][1]),
         'length': length,
-        'cropRange': cfg['cropRange'],
+        'ppm_range': cfg['ppm_range'],
         'scale': torch.ones(N,1,1).uniform_(cfg['scale'][0],
                                             cfg['scale'][1]),
         'rand_omit': cfg['drop_prob'],
@@ -302,24 +304,89 @@ def smooth(x: torch.Tensor,
 
 def sample_baselines(N: int, **cfg): 
     if not isinstance(cfg, type(None)):
-        dct = prepareConfig(cfg, pt_density=128)
+        try: cfg['pt_density']
+        except: cfg['pt_density'] = 128
+        dct = prepareConfig(N=N, cfg=cfg)#, pt_density=cfg['pt_density'])
         return dct
     return None
 
 
 def sample_resWater(N: int, **cfg):
     if not isinstance(cfg, type(None)):
-        dct = prepareConfig(cfg, pt_density=1204)
-        start, _ = rand_omit(torch.zeros(N,1,1).uniform_(0,cfg['prime']), 
+        try: cfg['pt_density']
+        except: cfg['pt_density'] = 1204
+        dct = prepareConfig(N=N, cfg=cfg)#, pt_density=cfg['pt_density'])
+        # start, _ = rand_omit(torch.zeros(N,1,1).uniform_(0,cfg['prime']), 
+        #                      0.0, cfg['drop_prob'])
+        # end, _   = rand_omit(torch.zeros(N,1,1).uniform_(0,cfg['prime']), 
+        #                      0.0, cfg['drop_prob'])
+        start, _ = rand_omit(torch.zeros(N,1,1).uniform_(-1*config['prime'],
+                                                         cfg['prime']), 
                              0.0, cfg['drop_prob'])
-        end, _   = rand_omit(torch.zeros(N,1,1).uniform_(0,cfg['prime']), 
+        end, _   = rand_omit(torch.zeros(N,1,1).uniform_(-1*config['prime'],
+                                                         cfg['prime']), 
                              0.0, cfg['drop_prob'])
-        dct.update({'cropRange_resWater': cfg['cropRange_water'],
+        dct.update({#'cropRange_resWater': cfg['cropRange_water'],
                     'start_prime': start,
                     'end_prime': end})
 
         return dct
     return None
+
+
+def sim2acquired(line: torch.Tensor, 
+                 sim_range: list, 
+                 target_ppm: torch.Tensor,
+                ) -> torch.Tensor:
+    '''
+    This approach uses nonuniform sampling density to reduce the memory 
+    footprint. This is possible because the tails being padded are always 
+    zero. Having 10e1 or 10e10 zeros gives the same result. So, small tails 
+    are padded to the input, 
+    '''
+    raw_ppm = [target_ppm.amin(), target_ppm.amax()]
+    if target_ppm.amin(keepdims=True)[0]!=line.shape[0]: 
+        raw_ppm = [raw_ppm[0].repeat(line.shape[0]), 
+                   raw_ppm[1].repeat(line.shape[0])]
+    if sim_range[0].shape[0]!=line.shape[0]: 
+        sim_range[0] = sim_range[0].repeat_interleave(line.shape[0], dim=0)
+    if sim_range[1].shape[0]!=line.shape[0]: 
+        sim_range[1] = sim_range[1].repeat_interleave(line.shape[0], dim=0)
+    for _ in range(3 - sim_range[0].ndim): 
+        sim_range[0] = sim_range[0].unsqueeze(-1)
+    for _ in range(3 - sim_range[1].ndim): 
+        sim_range[1] = sim_range[1].unsqueeze(-1)
+    for _ in range(3 - raw_ppm[0].ndim): 
+        raw_ppm[0] = raw_ppm[0].unsqueeze(-1)
+    for _ in range(3 - raw_ppm[1].ndim): 
+        raw_ppm[1] = raw_ppm[1].unsqueeze(-1)
+
+    pad = 1000 # number of points added to each side
+    pad_left, pad_right = 0, 0
+    
+    # Middle side
+    xaxis = batch_linspace(sim_range[0], sim_range[1], int(line.shape[-1]))
+
+    # Left side
+    if (raw_ppm[0]<sim_range[0]).all():
+        xaxis = torch.cat([batch_linspace(raw_ppm[0], sim_range[0], 
+                                          pad+1)[...,:-1], 
+                           xaxis], dim=-1) 
+        pad_left = pad
+   
+    # Right side
+    if (raw_ppm[1]>sim_range[1]).all():
+        xaxis = torch.cat([xaxis, batch_linspace(sim_range[1], raw_ppm[1], 
+                                                 pad+1)[...,1:]], dim=-1) 
+        pad_right = pad
+
+    padding = tuple([pad_left, pad_right])
+    signal = torch.nn.functional.pad(input=line, pad=padding, 
+                                     mode="constant", value=0)
+    #signal = batch_smooth(x=signal, window_len=float(3.0/signal.shape[-1]))
+    
+    ch_interp = CubicHermiteInterp(xaxis=xaxis, signal=signal)
+    return ch_interp.interp(xs=target_ppm)
 
 
 def sort_parameters(params: torch.Tensor,
@@ -361,3 +428,41 @@ def unwrap(phase: torch.Tensor,
     out = phase
     out[ind] = phase[ind] + ph_correct.cumsum(dim=dim)
     return out
+
+
+
+def normalize(signal: torch.Tensor,
+              fid: bool=False,
+              denom: torch.Tensor=None,
+              noisy: int=-3, # dim for noisy/clean
+             ) -> torch.Tensor:
+    '''
+    Normalize each sample of single or multi-echo spectra. 
+       Step 1: Find the max of the real and imaginary components separately
+       Step 2: Pick the larger value for each spectrum
+    If the signal is separated by metabolite, then an additional max() 
+       is necessary
+    Reimplemented according to: https://stackoverflow.com/questions/4157653
+       6/normalizing-complex-values-in-numpy-python
+    '''
+    if isinstance(denom, type(None)):
+        if signal.shape[-2]==1:
+            denom = torch.amax(signal.abs(), dim=-1, keepdim=True)#.values
+            # print(type(denom))
+        elif signal.shape[-2]==2:
+            denom = torch.amax(torch.sqrt(signal[...,0,:]**2 + 
+                                          signal[...,1,:]**2), 
+                               dim=-1, keepdim=True)#.values
+            # print('denom.shape ',denom.shape)
+            denom = denom.unsqueeze(-2)
+        else:
+            denom = torch.amax(signal[...,2,:].unsqueeze(-2),#.abs(), 
+                               dim=-1, keepdim=True)#.values
+
+        denom[denom.isnan()] = 1e-6
+        denom[denom==0.0] = 1e-6
+        denom = torch.amax(denom, dim=noisy, keepdim=True)
+
+    for _ in range(denom.ndim-signal.ndim): signal = signal.unsqueeze(1)
+
+    return signal / denom, denom
