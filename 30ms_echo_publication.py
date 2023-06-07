@@ -6,9 +6,8 @@ import sys
 import numpy as np
 import scipy.io as io
 import torch
-from aux import normalize
-from main_fcns import _save, prepare, simulate
-# from pm_v3 import PhysicsModel
+from src.aux import normalize
+from src.mainFcns import _save, prepare, simulate
 from types import SimpleNamespace
 
 sys.path.append('../')
@@ -18,26 +17,23 @@ def sample(inputs):
     config, resWater_cfg, baseline_cfg, pm, l, ind, p, totalEntries = inputs
 
     # Sample parameters
-    # print(ind)
     params = torch.ones((totalEntries, ind['overall'][-1]+1)).uniform_(0,1)
-    params = normalize(params, dims=-1) 
-    # normalize converts the range from [0,1) to [0,1].
-    # print(params[:,ind['metabolites']])
-
+    params, _ = normalize(params, noisy=-1, denom=None) 
+    # normalization converts the range from [0,1) to [0,1].
+    
     for i in ind['metabolites']:
         params[:,i].fill_(1.0)
 
 
     # Quantify parameters
     params = pm.quantify_params(params)
-    # print(params[:,ind['metabolites']])
     
     '''
     This next section of code will need to be customized for your own implementations.
     '''
 
     # All metabolite values are ratios wrt creatine. Therefore, Cr is always 1.0
-    denom = 2 # 1
+    denom = 1
     
     try: params[:,ind['pcr']].fill_(1.0)
     except KeyError as E: pass
@@ -49,8 +45,47 @@ def sample(inputs):
 
     # print(ind)
 
-    names = ["Asc", "Asp", "Ch", "Cr", "GABA", "GPC", "GSH", "Gln", "Glu", "mI", "Lac", "NAA", "NAAG", "PCh", "PCr", "PE", "sI", "Tau", "MM09", "MM12", "MM14", "MM17", "MM20", "Lip09", "Lip13", "Lip20"]
-    amps = [0.0804920187119920, 0, 0.1081, 0.507854651524663, 0.455613005467203, 0.221068064161334,  0.0968670765788001, 0.209273371106189, 1.45415790831963, 0.449486907354451,  0.0164778245907856, 1.45445578745539, 0.320213124374504, 0.1130, 0.492145348475337, 0, 0, 0.108357885219082, 10.314097589906174, 10.402136461787936, 10.358101078275321, 10.452705224928629, 10.551475712699752, 10.719485302705014,  10.414165486070721, 0]
+    names = ["Asc", "Asp", "Ch", 
+             "Cr", "GABA", "GPC", 
+             "GSH", "Gln", "Glu", 
+             "mI", "Lac", "NAA", 
+             "NAAG", "PCh", "PCr", 
+             "PE", "sI", "Tau", 
+             "MM09", "MM12", "MM14", 
+             "MM17", "MM20", "Lip09", 
+             "Lip13", "Lip20"]
+    amps = [0.0804920187119920, 
+            0, 
+            0.1081, 
+
+            0.507854651524663, 
+            0.455613005467203, 
+            0.221068064161334,  
+
+            0.0968670765788001, 
+            0.209273371106189, 
+            1.45415790831963, 
+
+            0.449486907354451,  
+            0.0164778245907856, 
+            1.45445578745539, 
+
+            0.320213124374504, 
+            0.1130, 
+            0.492145348475337, 
+
+            0, 
+            0, 
+            0.108357885219082, 
+
+            10.314097589906174, 
+            10.402136461787936, 
+            0.358101078275321, 
+            10.452705224928629, 
+            10.551475712699752, 
+            10.719485302705014,  
+            10.414165486070721, 
+            0]
     for n, v in zip(names,amps):
         params[:,ind[n.lower()]].fill_(v)
     '''
@@ -88,27 +123,27 @@ def sample(inputs):
 
     
 #     if config.num_coils>1:
-      print('>>> Transients')
-      factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_snr']].shape)
-      params[:,ind['coil_snr']] = factors
-      # Values are sampled from a Gaussian mu=1, min/max=0/2
-      # The linear SNR is calculated and scaled based on the number of transients
-      # Then the linear SNR is scaled about 1.0 so mu = lin_snr
-      if config.coil_sens:
-          print('>>> Coil Sensitivities')
-          params[:,ind['coil_sens']] = torch.distributions.normal.Normal(1,0.5).sample(params[:,ind['coil_sens']].shape).clamp(min=0.0,max=2.0)
+    print('>>> Transients')
+    factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_snr']].shape)
+    params[:,ind['coil_snr']] = factors
+    # Values are sampled from a Gaussian mu=1, min/max=0/2
+    # The linear SNR is calculated and scaled based on the number of transients
+    # Then the linear SNR is scaled about 1.0 so mu = lin_snr
+    if config.coil_sens:
+      print('>>> Coil Sensitivities')
+      params[:,ind['coil_sens']] = torch.distributions.normal.Normal(1,0.5).sample(params[:,ind['coil_sens']].shape).clamp(min=0.0,max=2.0)
 
-      if config.coil_fshift:
-          print('>>> Coil Frequency Drift')
-          factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_fshift']].shape)
-          params[:,ind['coil_fshift']] = factors * params[:,ind['coil_fshift']][0]
+    if config.coil_fshift:
+      print('>>> Coil Frequency Drift')
+      factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_fshift']].shape)
+      params[:,ind['coil_fshift']] = factors * params[:,ind['coil_fshift']][0]
 
-      if config.coil_phi0:
-          print('>>> Coil Phase Drift')
-          factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_phi0']].shape)
-          params[:,ind['coil_phi0']] = factors * params[:,ind['coil_phi0']][0]
+    if config.coil_phi0:
+      print('>>> Coil Phase Drift')
+      factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_phi0']].shape)
+      params[:,ind['coil_phi0']] = factors * params[:,ind['coil_phi0']][0]
 
-    if config.B0_samples
+    if config.samples=="B0":
         # Create pairs of samples with the same parameters - B0 inhomogeneities examples
         for i in [1,3,5]:
             params[i,:] = params[int(i-1),:].clone()
@@ -119,7 +154,7 @@ def sample(inputs):
             for n in ind['g']:
                 params[i,n].fill_(0.0)
 
-    if config.EC_samples:
+    if config.samples=="EC":
         # Create pairs of samples with the same parameters - B0 inhomogeneities examples
         for i in range(1,6): params[i,:] = params[0,:].clone()
         for i in [1,3,5]:
@@ -129,7 +164,7 @@ def sample(inputs):
                     params[int(i-1),n].fill_(0.001)
                     params[i,ii].fill_(i)
     
-    if config.phi_samples:
+    if config.samples=="PHI":
         # # Comparing phased, zero-, and first-order phase
         for i in range(1,6): params[i,:] = params[0,:].clone()
         for i in [0,2,4]:
@@ -140,7 +175,7 @@ def sample(inputs):
         params[5,ind['phi0']].fill_(0.0)
         params[1,ind['phi1']].fill_(0.0)
         params[3,ind['phi1']].fill_(0.0)
-        params[5,ind['phi1']].fill_(-20.0)
+        params[5,ind['phi1']].fill_(20.0)
     
 
     '''
@@ -165,7 +200,7 @@ def sample(inputs):
     if config.num_coils<=1:
         params[:,ind['coil_snr']].fill_(0.0)
         params[:,ind['coil_sens']].fill_(0.0)
-        params[:,ind['coil_fshift']].fill_(0.50)
+        params[:,ind['coil_fshift']].fill_(0.0)
         params[:,ind['coil_phi0']].fill_(0.0)
     
     params[:,ind['snr']].fill_(15)#8.6)

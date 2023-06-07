@@ -17,7 +17,8 @@ __all__ = ['batch_linspace', 'batch_smooth', 'complex_exp', 'concat_dict',
            'convertdict', 'counter', 'dict2tensors', 'Fourier_Transform', 
            'HilbertTransform', 'inv_Fourier_Transform', 'normalize', 
            'OrderOfMagnitude', 'rand_omit', 'sample_baselines', 
-           'sample_resWater', 'sort_parameters', 'torch2numpy', 'unwrap']
+           'sample_resWater', 'sim2acquired', 'sort_parameters', 
+           'torch2numpy', 'unwrap']
 
 
 PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
@@ -119,7 +120,7 @@ def convertdict(file, simple=False, device='cpu'):
                 file[k] = dict({str(a): torch.from_numpy(np.asarray(b, 
                     dtype=np.float32)).to(device) for a, b in zip(file[k][0,:], 
                                                                 file[k][1,:])})
-            elif k in ['notes', 'seq','vendor']:
+            elif k in ['notes', 'seq','vendor','pulse_sequence']:
                 delete.append(k)
             else:
                 file[k] = torch.from_numpy(np.asarray(file[k], 
@@ -248,6 +249,7 @@ def prepareConfig(N: int, cfg: dict) -> dict:#, pt_density: int):
     if len(cfg['lower'])==1: cfg['lower'] = [cfg['lower'][0], cfg['lower'][0]]
     if len(cfg['window'])==1: cfg['window'] = [cfg['window'][0], cfg['window'][0]]
     if len(cfg['scale'])==1: cfg['scale'] = [cfg['scale'][0], cfg['scale'][0]]
+    cfg['ppm_range'] = [torch.as_tensor([val]) for val in cfg['ppm_range']]
 
     return {
         'start': torch.zeros(N,1,1).uniform_(cfg['start'][0],
@@ -320,10 +322,10 @@ def sample_resWater(N: int, **cfg):
         #                      0.0, cfg['drop_prob'])
         # end, _   = rand_omit(torch.zeros(N,1,1).uniform_(0,cfg['prime']), 
         #                      0.0, cfg['drop_prob'])
-        start, _ = rand_omit(torch.zeros(N,1,1).uniform_(-1*config['prime'],
+        start, _ = rand_omit(torch.zeros(N,1,1).uniform_(-1*cfg['prime'],
                                                          cfg['prime']), 
                              0.0, cfg['drop_prob'])
-        end, _   = rand_omit(torch.zeros(N,1,1).uniform_(-1*config['prime'],
+        end, _   = rand_omit(torch.zeros(N,1,1).uniform_(-1*cfg['prime'],
                                                          cfg['prime']), 
                              0.0, cfg['drop_prob'])
         dct.update({#'cropRange_resWater': cfg['cropRange_water'],
@@ -361,7 +363,7 @@ def sim2acquired(line: torch.Tensor,
     for _ in range(3 - raw_ppm[1].ndim): 
         raw_ppm[1] = raw_ppm[1].unsqueeze(-1)
 
-    pad = 1000 # number of points added to each side
+    pad = 100 # number of points added to each side
     pad_left, pad_right = 0, 0
     
     # Middle side

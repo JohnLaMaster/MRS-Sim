@@ -5,7 +5,6 @@ import pickle
 import h5py
 import matplotlib.pyplot as plt
 import nibabel as nib
-import nibabel.nicom.dicomwrappers as nidcm
 import numpy as np
 from pathlib import Path
 from torch.nn import Module

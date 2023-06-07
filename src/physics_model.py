@@ -8,10 +8,10 @@ import numpy as np
 import scipy.io as io
 import torch
 import torch.nn as nn
-from aux import *
-from baselines import bounded_random_walk
-from interpolate import CubicHermiteMAkima as CubicHermiteInterp
 from numpy import pi
+from src.aux import *
+from src.baselines import bounded_random_walk
+from src.interpolate import CubicHermiteMAkima as CubicHermiteInterp
 from types import SimpleNamespace
 
 __all__ = ['PhysicsModel']
@@ -22,7 +22,7 @@ PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
 # Gyromagnetic ratio of protons
 # Citation: The National Institute of Standards and Technology, USA
 # https://physics.nist.gov/cgi-bin/cuu/Value?gammapbar
-gamma_p = torch.FloatTensor(42.577478518)
+gamma_p = torch.as_tensor(42.577478518)
 
 
 @torch.no_grad()
@@ -107,8 +107,10 @@ class PhysicsModel(nn.Module):
                    snr_metab: str=None,
                   ) -> tuple:
         # # Sort metabs and group met vs mm/lip
+        # print('PM.intialize.metab: ',metab) # correct
         self._metab, l, self.MM = self.order_metab(metab)
         self.MM = self.MM + 1 if  self.MM>-1 else False
+        num_bF = l + self.MM if self.MM else l
         # Initialize basic variables
         self.lineshape_type = lineshape
         self.cropRange = cropRange if cropRange else [self._ppm.min(), 
@@ -116,7 +118,7 @@ class PhysicsModel(nn.Module):
         self.t = self.t.unsqueeze(-1).float().squeeze().unsqueeze(0)
         self._basis_metab = []
         self.wrt_metab = wrt_metab
-        self.snr_metab = snr_metab is not isinstance(snr_metab, type(None)) else wrt_metab
+        self.snr_metab = snr_metab if not isinstance(snr_metab, type(None)) else wrt_metab
 
         # Add metabolite names to dictionary
         dct = OrderedDict()
@@ -131,7 +133,7 @@ class PhysicsModel(nn.Module):
         self.syn_basis_fids = torch.stack([torch.as_tensor(
             self.basisFcns['metabolites'][m.lower()]['fid'], 
             dtype=torch.float32) for m in self._metab], dim=0).unsqueeze(0)
-        num_lines = num_bF
+        num_lines = copy.copy(num_bF)
         if self.syn_basis_fids.ndim==5:
             num_lines *= self.syn_basis_fids.shape[-3]
 
@@ -141,7 +143,7 @@ class PhysicsModel(nn.Module):
             broaden = torch.exp(-lw*self.t).unsqueeze(-2).unsqueeze(0)
             self.syn_basis_fids *= broaden.expand_as(self.syn_basis_fids)
 
-
+        '''
         if difference_editing:
             self.difference_editing_fids = self.syn_basis_fids.clone()
             ind = [idx for idx, string in enumerate(difference_editing) if 
@@ -150,6 +152,7 @@ class PhysicsModel(nn.Module):
                 self.difference_editing_fids[0,ind,...] = torch.as_tensor(
                     self.basisFcns['metabolites'][m.lower()]['fid_OFF'], 
                     dtype=torch.float32)
+        '''
 
         # Define variables for later
         self.register_buffer('l', torch.FloatTensor([
@@ -157,8 +160,8 @@ class PhysicsModel(nn.Module):
         self.register_buffer('length', torch.FloatTensor([length]).squeeze())
         self.register_buffer('ppm_ref', torch.FloatTensor([ppm_ref]).squeeze())
         self.register_buffer('ppm_cropped', torch.fliplr(torch.linspace(
-                            float(self.cropRange[0]), float(self.cropRange[1]), 
-                            length).unsqueeze(0)))
+                             float(self.cropRange[0]), float(self.cropRange[1]), 
+                             length).unsqueeze(0)))
 
         self.spectral_resolution = spectral_resolution
         self.image_resolution = image_resolution
@@ -175,29 +178,36 @@ class PhysicsModel(nn.Module):
 
         ### Define the index used to specify the variables in the forward pass 
         # # and in the sampling code
-        num_bF = l + self.MM if self.MM else l
+        # num_bF = l + self.MM if self.MM else l
+        # print('self._metab: ',self._metab) # correct
         header, cnt = self._metab, counter(start=int(3 * num_bF) - 1)
         g = 1 if not self.MM else 2
-        names = ['d',   'dmm', 'g',   'gmm', 'fshift', 'snr', 'phi0', 'phi1']
-        mult  = [  l, self.MM,   l, self.MM,        1,     1,      1,      1] 
+        names = ['d',   'dmm', 'g',   'gmm', 'fshift']#, 'snr', 'phi0', 'phi1']
+        mult  = [  l, self.MM,   l, self.MM,        1]#,     1,      1,      1] 
 
 
         # Should be a global fshift then individual metabolites 
         # and MM/Lip fsfhitfs
-        names.insert(-4,'fshiftmet'),       mult.insert(-4,l)
-        names.insert(-4,'fshiftmm'),        mult.insert(-6,self.MM)
-        names.insert(-1,'b0'),              mult.append(1)
-        names.insert(-1,'bO_dir'),          mult.append(3)
-        names.insert(-1,'eddyCurrents_A'),  mult.append(1)
-        names.insert(-1,'eddyCurrents_tc'), mult.append(1)
+        names.append('fshiftmet'),          mult.append(l)
+        names.append('fshiftmm'),           mult.append(self.MM)
+        names.append('snr'),                mult.append(1)
+        names.append('phi0'),               mult.append(1)
+        names.append('phi1'),               mult.append(1)
+        names.append('b0'),                 mult.append(1)
+        names.append('bO_dir'),             mult.append(3)
+        names.append('eddyCurrents_A'),     mult.append(1)
+        names.append('eddyCurrents_tc'),    mult.append(1)
         names.append('coil_snr'),           mult.append(num_coils)
         names.append('coil_sens'),          mult.append(num_coils)
         names.append('coil_fshift'),        mult.append(num_coils)
         names.append('coil_phi0'),          mult.append(num_coils)
+        names.append('temperature'),        mult.append(1)
         for n, m in zip(names, mult): 
             for _ in range(m): header.append(n)
             
         # Define the min/max ranges for quantifying the variables
+        # print('header: ',header) # correct
+        print('type(header): ',type(header))
         self.define_parameter_ranges(header=header)
 
 
@@ -240,6 +250,8 @@ class PhysicsModel(nn.Module):
         # Zero-Order phase unalignment
         ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,num_coils)))
 
+        ind.append(cnt(1)) # Temperature
+
         # # Cummulative
         total = cnt(1)
         ind.append(tuple(int(x) for x in torch.arange(0,num_bF)))     # Metabolites
@@ -262,6 +274,7 @@ class PhysicsModel(nn.Module):
         dct.update({'Coil_Sens': torch.empty(1)})
         dct.update({'Coil_fShift': torch.empty(1)})
         dct.update({'Coil_Phi0': torch.empty(1)})
+        dct.update({'Temperature': torch.empty(1)})
         dct.update({'Metabolites': torch.empty(1), 
                     'Parameters': torch.empty(1), 
                     'Overall': torch.empty(1)})
@@ -271,7 +284,8 @@ class PhysicsModel(nn.Module):
 
         return dct, ind
 
-    def define_parameter_ranges(header: list):
+    def define_parameter_ranges(self,
+                                header: list[str]) -> None:
         self.min_ranges = torch.zeros([1,len(header)], dtype=torch.float32)
         self.max_ranges = torch.zeros_like(self.min_ranges)
         for i, m in enumerate(header):
@@ -357,12 +371,14 @@ class PhysicsModel(nn.Module):
         Simulate baseline offsets
         '''
         cfg = SimpleNamespace(**config)
-        baselines = batch_smooth(bounded_random_walk(cfg.start, cfg.end, 
-                                                     cfg.std, cfg.lower_bnd, 
-                                                     cfg.upper_bnd, 
-                                                     cfg.length), 
+        baselines = batch_smooth(
+                        bounded_random_walk(cfg.start, cfg.end, 
+                                            cfg.std, cfg.lower_bnd, 
+                                            cfg.upper_bnd, 
+                                            cfg.length), 
                                  cfg.windows, 'constant')
 
+        # Subtract the trend lines 
         trend = batch_linspace(baselines[...,0].unsqueeze(-1),
                                baselines[...,-1].unsqueeze(-1), 
                                cfg.length)
@@ -377,47 +393,16 @@ class PhysicsModel(nn.Module):
         # Convert simulated residual water from local to clinical range before 
         # Hilbert transform makes the imaginary component. Then resample 
         # acquired range to cropped range.
-        ppm = self._ppm.clone()#.unsqueeze(-1)#.repeat(1,baselines.shape[0],1)
-        # print(ppm.amin(),ppm.amax(), self.ppm.amin(),self.ppm.amax())
-        # original = batch_linspace(start=cfg.start, stop=cfg.end, steps=baselines.shape[-1])
-        # # print(baselines.shape,original.shape)
-        # # print('isnan test: ',torch.isnan(baselines).any())
-        # a = sim2acquired(baselines * config['scale'], 
-        #                                   [cfg.start, cfg.end],
-        #                                   self.ppm)
-        # # print('isnan test: ',torch.isnan(a).any())
-        # a = HilbertTransform(a)
-        # # print('isnan test: ',torch.isnan(a).any())
-        # raw_baseline = a
-        # raw_baseline = HilbertTransform(
-        #                 sim2acquired(baselines * config['scale'], 
-        #                                   [cfg.start, cfg.end],
-        #                                   self.ppm)
-        #                )
-        # print('baselines.shape: {}'.format(baselines.shape))
-        ppm_range = [torch.as_tensor(val).unsqueeze(-1) for val in cfg.ppm_range]
-        raw_baseline = sim2acquired(baselines * config['scale'], 
-                                    [ppm_range[0], ppm_range[1]],
-                                    self.ppm)
-        # print('min: {}, max: {}'.format(raw_baseline.min().squeeze(), raw_baseline.max().squeeze()))
-        # raw_baseline = Fourier_Transform(rinv_Fourier_Transform(raw_baseline))
-        # print('raw_baseline.shape: {}'.format(raw_baseline.shape))
-        # raw_baseline = torch.cat([raw_baseline, torch.zeros_like(raw_baseline)],
-        #                          dim=-2)
-                       
-        # print('isnan test: ',torch.isnan(raw_baseline).any())
+        # ppm_range =  [torch.as_tensor(val) for val in cfg.ppm_range]
+        raw_baseline = HilbertTransform(
+                        sim2acquired(baselines * config['scale'], 
+                                          [cfg.ppm_range[0], cfg.ppm_range[1]],
+                                          self.ppm)
+                       )
+        
         ch_interp = CubicHermiteInterp(xaxis=self.ppm, signal=raw_baseline)
         baselines = ch_interp.interp(xs=self.ppm_cropped)
-        # print('min: {}, max: {}'.format(baselines.min().squeeze(), baselines.max().squeeze()))
-
-        # raw_baseline = torch.cat([raw_baseline, torch.zeros_like(raw_baseline)],dim=-2)
-        raw_baseline = raw_baseline.repeat_interleave(2,dim=-2)
-
-        # # return baselines.fliplr(), raw_baseline.fliplr()
-        # return torch.fliplr(baselines), raw_baseline
-        # return baselines, raw_baseline
-        # return raw_baseline.flip(dims=[-1]), raw_baseline
-        # return raw_baseline.fliplr(), inv_Fourier_Transform(raw_baseline)
+        
         return raw_baseline.fliplr(), raw_baseline
     
     
@@ -513,6 +498,9 @@ class PhysicsModel(nn.Module):
                         fid: torch.Tensor,
                         phi0: torch.Tensor,
                        ) -> torch.Tensor:
+        # Convert phi0 from ppm to Hz
+        phi0 = (self.ppm_ref + phi0) * self.carrier_frequency
+        
         if fid.ndim>4:
             for _ in range(fid.ndim - phi0.ndim - 2): phi0 = phi0.unsqueeze(1)
                 # => [bS, [[ON/OFF], [noisy/noiseless]], transients_phi]
@@ -598,7 +586,7 @@ class PhysicsModel(nn.Module):
 
         return inv_Fourier_Transform(
                     complex_exp(Fourier_Transform(fid), 
-                                (-1*self.phi1_ref*phi.deg2rad()))
+                                (-1*self.phi1_ref*phi1.deg2rad()))
             )
 
         
@@ -619,6 +607,8 @@ class PhysicsModel(nn.Module):
             
         for _ in range(fid.ndim - param.ndim): param = param.unsqueeze(-1)
         for _ in range(fid.ndim - t.ndim): t = t.unsqueeze(0)
+        # Convert frequency shift from ppm to Hz
+        param = (self.ppm_ref + param) * self.carrier_frequency
         f_shift = param.mul(t).expand_as(fid)
         
         return complex_exp(fid, f_shift)
@@ -655,7 +645,7 @@ class PhysicsModel(nn.Module):
         '''
         # Set variables in case of multicoil transients
         zeros, d = torch.where(zeros<=0.0,1,0).sum(dim=-1,keepdims=True), -4
-        if transients.ndim==1: zeros, transients, d = None, None, -3
+        if transients.shape[1]==1: zeros, transients, d = None, None, -3
 
         for _ in range(fid.ndim-max_val.ndim): max_val = max_val.unsqueeze(-1)
         for _ in range(fid.ndim-param.ndim): param = param.unsqueeze(-1)
@@ -1366,7 +1356,7 @@ class PhysicsModel(nn.Module):
         print('>>>>> Compiling spectra')
         return self.compile_outputs(specSummed, spectral_fit, offsets, params, 
                                     denom, self.quantify_metab(fid, params, 
-                                                               wrt_metab)
+                                                               self.wrt_metab)
                                     )
 
     def compile_outputs(self, 

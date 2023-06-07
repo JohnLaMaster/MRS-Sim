@@ -1,7 +1,7 @@
 %%% User defined input
-save_name = 'press_ge_30.mat'; % Must be unique so as not to overwrite other files
+% save_name = 'press_ge_30.mat'; % Must be unique so as not to overwrite other files
 template = '/home/john/Documents/Research/In-Vivo-MRSI-Simulator/src/basis_sets/press_ge_144.mat';
-new_path = '/home/john/Documents/Repositories/MARSSCompiled/GE_PRESS_30ms/SummedSpins_for_MARSSinput/*.mat';
+new_path = '/home/john/Documents/Repositories/INSPECTOR/basis_sets/PRESS_GE_30_2000/IndividualSpins/*.mat';
 B0 = 3;
 centerFreq = 4.6500;
 edit_off_paths = {}; % {'path/lactate.mat','path/gaba.mat'};
@@ -11,7 +11,8 @@ metabs_off = {}; % {'lac','gaba'};
 load(template, 'metabolites','header','artifacts')
 fileinfo = dir(new_path);
 fnames = {fileinfo.name};
-directory = struct2cell(fileinfo); directory = char(directory(2,1));
+directory = struct2cell(fileinfo); directory
+directory = char(directory(2,1));
 first = -1;
 
 for i=1:length(fnames)
@@ -46,6 +47,6 @@ if ~isempty(edit_off_paths)
     end
 end
 
-%%% Saving
-[path, x, x] = fileparts(template); % Stores new basis set with the others
-save(fullfile(path,save_name), 'metabolites','header','artifacts')
+% // %%% Saving
+% // [path, x, x] = fileparts(template); % Stores new basis set with the others
+% // save(fullfile(path,save_name), 'metabolites','header','artifacts')

@@ -1,8 +1,11 @@
 {
     "totalEntries": 6,
     "PM_basis_set": "PRESS_30_GE_2000.mat",
+    "NIfTIMRS": false,
     "metabolites": ["Asc", "Asp", "Ch", "Cr", "GABA", "Gln", "Glu", "GPC", "GSH", "Lac", "mI", "NAA", "NAAG", "PCh", "PCr", "PE", "sI", "Tau", "MM09", "MM12", "MM14", "MM17", "MM20", "Lip09", "Lip13", "Lip20"], 
     "wrt_metab": "Cr,PCr",
+    "wrt_metab_ratio": [0.525,0.475],
+    "snr_metab": "Cr,PCr",
     "B0": 3.0, 
     "TE": 30,
     "vendor": "GE",
@@ -16,13 +19,14 @@
     "image_resolution":    [ 0.5,  0.5,  0.5],
     "spectral_resolution": [10.0, 10.0, 10.0],
     "notes": "30ms echo dataset for MRS-Sim publication, [-3.1789, 12.4789]",
+    "samples": "PHI",
 
     
-    "b0": true,
+    "b0": false,
     "fids": false,
-    "eddy": true,
-    "fshift_g": true,
-    "fshift_i": true,
+    "eddy": false,
+    "fshift_g": false,
+    "fshift_i": false,
     "phi0": true,
     "phi1": true,
     "noise": true,
@@ -85,34 +89,35 @@
         "mm14":            [   0.0,  15.0],
         "mm17":            [   0.0,  15.0],
         "mm20":            [   0.0,  15.0],
-        "lip09":            [   0.0,  15.0],
-        "lip13":            [   0.0,  15.0],
-        "lip20":            [   0.0,  15.0]
+        "lip09":           [   0.0,  15.0],
+        "lip13":           [   0.0,  15.0],
+        "lip20":           [   0.0,  15.0]
     },
 
 
     "baseline_cfg": {
-        "start":           [            0],
-        "end":             [            0],
+        "start":           [    -1,     1],
+        "end":             [    -1,     1],
         "upper":           [            1],
         "lower":           [           -1],
         "std":             [  0.05,  0.20],
         "window":          [  0.15,   0.3],
         "pt_density":          128,
-        "cropRange":       [  -1.6,   8.5],
-        "scale":           [     1,   1.0],
+        "ppm_range":       [  -1.6,   8.5],
+        "scale":           [   0.1,   1.0],
         "drop_prob":           0.0
     },
 
 
     "resWater_cfg": {
+        "start":           [            0],
+        "end":             [            0],
         "upper":           [     0,     1],
         "lower":           [     0,     1],
         "std":             [   0.2,  0.40],
         "window":          [         0.01],
         "pt_density":         1204,
-        "cropRange_water": [   4.4,   4.9],
-        "cropRange":       [     0,     5],
+        "ppm_range":       [   4.4,   4.9],
         "prime":              0.15,
         "scale":           [  0.05,  0.20],
         "drop_prob":           0.0

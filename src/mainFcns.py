@@ -5,9 +5,10 @@ import os
 from collections import OrderedDict
 
 import numpy as np
-from NIfTI-MRS import Mat2NIfTI_MRS
-from physics_model import PhysicsModel
 from scipy.io import savemat as io_savemat
+from src.aux import sample_baselines, sample_resWater, sort_parameters
+from src.NIfTIMRS import Mat2NIfTI_MRS
+from src.physics_model import PhysicsModel
 from types import SimpleNamespace
 
 __all__ = ['prepare', '_save', 'simulate']
@@ -134,8 +135,6 @@ def simulate(inputs, args=None):
                              coil_sens=config.coil_sens,
                              magnitude=config.magnitude,
                              multicoil=config.num_coils,
-                             snr_combo=config.snr_combo,
-                             wrt_metab=config.wrt_metab,
                              zero_fill=config.zero_fill,
                              broadening=config.broadening,
                              coil_fshift=config.coil_fshift,
@@ -183,3 +182,4 @@ def simulate(inputs, args=None):
             if config.NIfTIMRS:
                 save2nifti(datapath=new_path)
         del spectra, fit, baseline, reswater, parameters, quantities
+    return path
