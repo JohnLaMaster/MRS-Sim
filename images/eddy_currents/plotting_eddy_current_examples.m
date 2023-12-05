@@ -22,8 +22,11 @@ for n=1:length(ch)
             end
         end
         
-        plot(ppm,squeeze(plotting(m+1,1,1,:)./mx),'Color',[0.4 0.4 0.4],'DisplayName','With EC')
-        plot(ppm,squeeze(plotting(m,1,1,:)./mx),'Color',[0 0.4470 0.7410],'DisplayName','Without EC')
+%         plot(ppm,squeeze(plotting(m+1,1,1,:)./mx),'Color',[0.4 0.4 0.4],'DisplayName','With EC')
+        plot(ppm,squeeze(plotting(m+1,1,1,:)./mx),'Color',[0.5 0.5 0.5],'DisplayName','With EC')
+%         plot(ppm,squeeze(plotting(m+1,1,1,:)./mx),'r','DisplayName','With EC')
+%         plot(ppm,squeeze(plotting(m,1,1,:)./mx),'Color',[0 0.4470 0.7410],'DisplayName','Without EC')
+        plot(ppm,squeeze(plotting(m,1,1,:)./mx),'Color',[0 0 0],'DisplayName','Without EC')
         hold off
         if n==1
             legend('FontSize', 12,'FontName','arial',Location="northwest")
@@ -32,7 +35,7 @@ for n=1:length(ch)
         xlim([1.8 4.2])
         ylim([-0.05, 1.0])
         axis off
-        name = strjoin({'/home/john/Documents/Research/In-Vivo-MRSI-Simulator/images/eddy_currents/',save_names{n},'.eps'},'');
+        name = strjoin({'/home/john/Documents/Repositories/MRS-Sim/images/eddy_currents/',save_names{n},'.eps'},'');
         exportgraphics(gca,name,'Resolution',800)
 
     end

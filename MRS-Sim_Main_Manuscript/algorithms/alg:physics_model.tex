@@ -1,0 +1,46 @@
+\begin{algorithm}
+\caption{Physics Model for Data Simulation}\label{alg:PM}
+\begin{algorithmic}
+  \State \textbf{Given:} $totalEntries$ = total number of spectra to simulate; $\theta$ = model parameters; and $N$ = metabolites;% and $r$ = intravoxel spatial localization;
+  \State \textbf{Step 1:} Sample $\theta_{totalEntries}$ 
+  \State \textbf{Step 2:} Quantify $\theta$
+  \State \textbf{Step 3:} Generate baseline and residual water
+  \State \textbf{Step 4:} Calculate $B_0$ inhomogeneities
+  \For {each metabolite basis function in $N$}
+    \State \textbf{Step 5:} Modulate amplitude
+    \State \textbf{Step 6:} Apply $B_0$ distortions
+    \State \textbf{Step 7:} Apply lineshape profile
+  \EndFor
+  \State \textbf{Step 8:} Sum the basis functions
+  \State \textbf{Step 9:} Apply noise 
+    \If{transients=True}
+      \State \textbf{Step9a:} Generate transients
+    \EndIf
+  \State \textbf{Step 10:} Add baseline and residual water from \textbf{Step 3} 
+  \State \textbf{Step 11:} Apply zero-order phase
+  \State \textbf{Step 12:} Apply first-order phase
+  \State \textbf{Step 13:} Fourier transform to recover spectra
+  \State \textbf{Step 14:} Crop and resample
+\end{algorithmic}
+\end{algorithm}
+
+    % - Sampling parameters
+    % - Amplitude Scaling
+    % - Lineshape profile
+    %   - Lorentzian
+    %   - Gaussian
+    %   - Voigt
+    % - Phase offsets
+    %   - Zero-Order
+    %   - First-Order
+    % - Frequency shift
+    %   - Water-based shift
+    %   - Fat/MM/Lipid shift
+    %   - Temperature- and pH-induced shifts
+    % - Noise
+    %   - Hilbert transform
+    %   - Transients
+    % - B0 inhomogeneities
+    % - Baseline and Residual Water
+    % - Recover spectrum
+    % - Interpolate

@@ -2,6 +2,7 @@ import copy
 import math
 import os
 from collections import OrderedDict
+import json
 
 import numpy as np
 import scipy.io as io
@@ -291,6 +292,28 @@ def load_parameters(path: str, prepare: tuple):
     return out
 
 
+def load_default_values(path: str, pm: nn.Module, quant: str="T2", spins: bool=False):
+    assert quant.lower() in ["t2", "conc"]
+    key = "spins" if spins else "metab"
+    with open(path) as file:
+        values = json.load(file)
+    
+    num_spins = pm._num_spins
+    end = len(pm.spins) - 1
+    
+    minimum = torch.zeros(end)
+    maximum = torch.zeros(end)
+
+    metabs, _ = pm.metab
+
+    for i, ind in enumerate(range(0,end,num_spins)):
+        met = values[metabs[i]][quant][key]
+        for n in range(0,len(met["min"])):
+            minimum[:,ind+n] = met["min"][n]
+            maximum[:,ind+n] = met["max"][n]
+    return minimum, maximum
+
+
 def smooth(x: torch.Tensor,
            window_len: float=0.1,
            window: str='flat') -> torch.Tensor:
@@ -468,3 +491,4 @@ def normalize(signal: torch.Tensor,
     for _ in range(denom.ndim-signal.ndim): signal = signal.unsqueeze(1)
 
     return signal / denom, denom
+

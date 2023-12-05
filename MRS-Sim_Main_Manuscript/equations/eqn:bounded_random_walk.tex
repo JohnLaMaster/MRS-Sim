@@ -1,0 +1,25 @@
+\begin{equation}
+\begin{aligned}
+&\text{Let } S = start, E = end, \sigma = std, L = length, l_b = lower_bound, u_b = upper_bound,\\
+&\qquad\qquad B = bounds = u_b - l_b \\
+&\text{Let } R = (std \cdot (U - 0.5)).cumsum(-1) \text{ where } U \in [0, 1]^{S_1 \times ... \times S_n \times L} \\
+&\text{Let } T = \text{batch\_linspace}(R[..., 0].unsqueeze(-1), R[...,-1].unsqueeze(-1), L) \\
+&\text{Let } D = R - T \\
+&\qquad\qquad\qquad\text{Normalize } D \text{ to fit within the bounds [}l_b, u_b\text{]} \\
+&\qquad\qquad\qquad D \gets \frac{D}{\max((D.\text{amax}(-1) - D.\text{amin}(-1)).unsqueeze(-1) / B, \min=1, \max=None)} \\
+&\text{Let } L' = \text{batch\_linspace}(S, E, L) \\
+&\text{Let } \Delta_u = u_b - L' \\
+&\text{Let } \Delta_l = l_b - L' \\
+&\text{Identify slips above upper bound} \\
+&\qquad\qquad\qquad \text{where } D \geq \Delta_u \text{ create a boolean mask } M_u \\
+&\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\text{and calculate upper slips} \\
+&\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\Delta_u' = D - \Delta_u \\
+&\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad D[M_u] \gets (\Delta_u - \Delta_u')[M_u] \\
+&\text{Identify slips below lower bound} \\
+&\qquad\qquad\qquad \text{where } \Delta_l \geq D \text{ create a boolean mask } M_l \\
+&\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\text{and calculate lower slips} \\
+&\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\Delta_l' = \Delta_l - D \\
+&\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad\qquad D[M_l] \gets (\Delta_l + \Delta_l')[M_l] \\
+&\text{Return } L' + D \\
+\end{aligned} \label{eqn:bounded random walk}
+\end{equation}

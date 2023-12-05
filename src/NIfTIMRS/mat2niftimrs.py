@@ -1,18 +1,21 @@
 import datetime
 import json
+import os
 import pickle
 
 import h5py
 import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
+import scipy.io as io
 from pathlib import Path
-from torch.nn import Module
+
+# from torch.nn import Module
 
 __all__ = ['Mat2NIfTI_MRS']
 
 
-class Mat2NIfTI_MRS(Module):
+class Mat2NIfTI_MRS():
     '''
     This class is used to convert the simulated data in .mat files from MRS-Sim to
     NIfTI-MRS format. 
@@ -21,7 +24,7 @@ class Mat2NIfTI_MRS(Module):
                  combine_complex: bool=True,
                  test_output: bool=True,
                  ):
-        NIFTIOrient = './NIFTIOrient_object.pkl'
+        NIFTIOrient = './src/NIfTIMRS/NIFTIOrient_object.pkl'
         with open(NIFTIOrient,'rb') as file:
             self.currNiftiOrientation = pickle.load(file)
 

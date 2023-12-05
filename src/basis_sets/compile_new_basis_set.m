@@ -1,17 +1,17 @@
 %%% User defined input
 % save_name = 'press_ge_30.mat'; % Must be unique so as not to overwrite other files
-template = '/home/john/Documents/Research/In-Vivo-MRSI-Simulator/src/basis_sets/press_ge_144.mat';
-new_path = '/home/john/Documents/Repositories/INSPECTOR/basis_sets/PRESS_GE_30_2000/IndividualSpins/*.mat';
+template = '/home/john/Documents/Research/In-Vivo-MRSI-Simulator/src/basis_sets/PRESS_30_GE_2000.mat';
+new_path = '/home/john/Documents/Repositories/INSPECTOR/basis_sets/PRESS_30_GE_30_2000/IndividualSpins/*.mat';
 B0 = 3;
 centerFreq = 4.6500;
 edit_off_paths = {}; % {'path/lactate.mat','path/gaba.mat'};
 metabs_off = {}; % {'lac','gaba'};
 
 %%% Automated storage of metabolites and basis functions
-load(template, 'metabolites','header','artifacts')
+% load(template)%, 'metabolites','header','artifacts')
 fileinfo = dir(new_path);
 fnames = {fileinfo.name};
-directory = struct2cell(fileinfo); directory
+directory = struct2cell(fileinfo); %directory
 directory = char(directory(2,1));
 first = -1;
 
@@ -33,7 +33,8 @@ for i=1:length(fnames)
     end
     [a, metab,b] = fileparts(pth);
     metab = lower(metab);
-    metabolites.(metab).fid = [real(exptDat.fid'); imag(exptDat.fid')];
+    metabolites.(metab).fid(:,1,:) = real(exptDat.fid'); 
+    metabolites.(metab).fid(:,2,:) = imag(exptDat.fid');
 end
 
 %%% If spectral editing or othe unique basis functions need to be stored
@@ -50,3 +51,45 @@ end
 % // %%% Saving
 % // [path, x, x] = fileparts(template); % Stores new basis set with the others
 % // save(fullfile(path,save_name), 'metabolites','header','artifacts')
+
+
+
+
+
+%%
+%%% User defined input
+% save_name = 'press_ge_30.mat'; % Must be unique so as not to overwrite other files
+new_path = '/home/john/Documents/Repositories/INSPECTOR/basis_sets/PRESS_30_GE_30_2000/IndividualSpins/*.mat';
+
+%%% Automated storage of metabolites and basis functions
+% load(template)%, 'metabolites','header','artifacts')
+fileinfo = dir(new_path);
+fnames = {fileinfo.name};
+directory = struct2cell(fileinfo); %directory
+directory = char(directory(2,1));
+
+for i=1:length(fnames)
+    pth = fullfile(directory,fnames{i});
+    load(pth,'exptDat')
+%     data = exptDat.fid;
+    data = fftshift(fft(exptDat.fid,[],1),1);
+    s = size(data);
+    mx = max(real(data),[],1);
+    [ind, ignore] = find(real(data)==mx);
+    stored = {fnames{i}};
+    for ii=1:s(2)
+%         f = figure;
+%         plot(ppm, squeeze(real(data(:,ii)')))
+%         set(gca,'xdir','reverse')
+%         title(fnames{i})
+        
+%         for k=1:length(ind)
+        stored(k+1) = {ppm(ind(ii))};
+%         end
+%         stored
+%         waitforbuttonpress
+%         close(f)
+    end
+    stored
+end
+

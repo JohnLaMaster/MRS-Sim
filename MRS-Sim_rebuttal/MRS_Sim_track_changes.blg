@@ -1,0 +1,82 @@
+This is BibTeX, Version 0.99d (TeX Live 2017/Debian)
+Capacity: max_strings=100000, hash_size=100000, hash_prime=85009
+The top-level auxiliary file: MRS_Sim_track_changes.aux
+The style file: WileyNJD-AMA.bst
+I found no \bibdata command---while reading file MRS_Sim_track_changes.aux
+Warning--I didn't find a database entry for "Augustine2008"
+Warning--I didn't find a database entry for "Laccetta2022"
+Warning--I didn't find a database entry for "Tomiyasu2022"
+Warning--I didn't find a database entry for "Gao2014"
+Warning--I didn't find a database entry for "Martin2007"
+Warning--I didn't find a database entry for "McKiernan2023"
+Warning--I didn't find a database entry for "Oz2016"
+Warning--I didn't find a database entry for "Cecil2006"
+Warning--I didn't find a database entry for "Gropman2020"
+Warning--I didn't find a database entry for "Lai2022"
+Warning--I didn't find a database entry for "Calvar2005"
+Warning--I didn't find a database entry for "Lukas2004"
+Warning--I didn't find a database entry for "Padelli2022"
+Warning--I didn't find a database entry for "Nelson2003"
+Warning--I didn't find a database entry for "Forester2010"
+Warning--I didn't find a database entry for "Inglese2004"
+Warning--I didn't find a database entry for "Reyngoudt2012"
+Warning--I didn't find a database entry for "Das2017"
+Warning--I didn't find a database entry for "Gurbani2019"
+Warning--I didn't find a database entry for "Hatami"
+Warning--I didn't find a database entry for "Lee2019"
+Warning--I didn't find a database entry for "Hogben2011"
+Warning--I didn't find a database entry for "Landheer2021"
+Warning--I didn't find a database entry for "Simpson2017"
+Warning--I didn't find a database entry for "Smith1994"
+Warning--I didn't find a database entry for "Soher2011"
+Warning--I didn't find a database entry for "Stefan2009"
+Warning--I didn't find a database entry for "Tal2020"
+Warning--I didn't find a database entry for "Craven2022"
+Warning--I didn't find a database entry for "Marjanska2021"
+Warning--I didn't find a database entry for "Marjanska2022"
+Warning--I didn't find a database entry for "Zollner2021"
+Warning--I didn't find a database entry for "Das2018a"
+Warning--I didn't find a database entry for "Das2018"
+Warning--I didn't find a database entry for "Iqbal2018a"
+You've used 0 entries,
+            2067 wiz_defined-function locations,
+            589 strings with 4580 characters,
+and the built_in function-call counts, 24 in all, are:
+= -- 0
+> -- 0
+< -- 0
++ -- 0
+- -- 0
+* -- 4
+:= -- 9
+add.period$ -- 0
+call.type$ -- 0
+change.case$ -- 0
+chr.to.int$ -- 0
+cite$ -- 0
+duplicate$ -- 0
+empty$ -- 1
+format.name$ -- 0
+if$ -- 1
+int.to.chr$ -- 0
+int.to.str$ -- 0
+missing$ -- 0
+newline$ -- 4
+num.names$ -- 0
+pop$ -- 0
+preamble$ -- 1
+purify$ -- 0
+quote$ -- 0
+skip$ -- 1
+stack$ -- 0
+substring$ -- 0
+swap$ -- 0
+text.length$ -- 0
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 0
+warning$ -- 0
+while$ -- 0
+width$ -- 0
+write$ -- 3
+(There was 1 error message)

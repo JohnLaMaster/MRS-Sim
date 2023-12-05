@@ -29,7 +29,8 @@ def prepare(config_file):
     totalEntries = config.totalEntries
 
     # Define and initialize the physics model
-    pm = PhysicsModel(PM_basis_set=config.PM_basis_set)
+    pm = PhysicsModel(PM_basis_set=config.PM_basis_set,
+                      TE=config.TE)
     pm.initialize(metab=config.metabolites, 
                   basisFcn_len=config.basis_fcn_length,
                   b0=config.b0,
@@ -103,7 +104,7 @@ def _save(path: str,
 
 
 def simulate(inputs, args=None):
-    config, resWater_cfg, baseline_cfg, pm, l, ind, p, totalEntries, params = inputs
+    config, resWater_cfg, baseline_cfg, pm, l, ind, p, totalEntries, params, baseline, reswater = inputs
     '''
     Begin simulating and saving the spectra
     '''
@@ -139,7 +140,8 @@ def simulate(inputs, args=None):
                              broadening=config.broadening,
                              coil_fshift=config.coil_fshift,
                              residual_water=sample_resWater(n-i, **resWater_cfg) if resWater_cfg else False,
-                             drop_prob=config.drop_prob)
+                             drop_prob=config.drop_prob,
+                             presim={'baseline':baseline,'reswater':reswater})
         ppm = pm.ppm.numpy()
 
         if first:
@@ -164,7 +166,7 @@ def simulate(inputs, args=None):
                              ppm=ppm,
                              header=config.header)
             if config.NIfTIMRS:
-                save2nifti(datapath=new_path)
+                save2nifti.forward(datapath=new_path)
             first = True
             counter += 1
             print('>>> ** {} ** <<<'.format(counter))
@@ -180,6 +182,6 @@ def simulate(inputs, args=None):
                              ppm=ppm,
                              header=config.header)
             if config.NIfTIMRS:
-                save2nifti(datapath=new_path)
+                save2nifti.forward(datapath=new_path)
         del spectra, fit, baseline, reswater, parameters, quantities
     return path
