@@ -11,18 +11,22 @@
 
 # MRS-Sim: Open-Source Framework for Simulating Realistic, In Vivo-like Clinical Magnetic Resonance Spectra
 
-**In review: Expected publication in _Summer 2023_.**
+**Under review: Expected publication in _Spring 2024_.**
 
-***Note:** Code in this repository is still being prepare for publication and is expected to be finalized by the date of publication of the corresponding manuscript. Be sure to check back during the summer 2023 for the first official release.
+***Note:** The current version is the pre-release. The first full release will come soon. If you happen to find any bugs, please open an issue to let me know.
 
-_Abstract:_ This work presents the first open-source, publicly available \textit{in-vivo}-like data simulator for generating synthetic magnetic resonance spectroscopy data that is geared towards community development. This simulator uses high fidelity basis functions that are simulated for sequence- and brand-specific scenarios. The underlying physics model includes all spectral components found in spectral fitting routines, i.e. zero- and first-order phase, Voigtian lineshapes, frequency shifts, and eddy currents. In addition to the standard spectra types, this model can simulate multi-coil transients with or without coil artifacts as well as raw and pre-processed spectra. A $B_0$ field map simulator can be used to model severe susceptibility effects commonly found near the sinuses or deep brain structures. Finally, a novel semi-parametric simulator for residual water regions and baseline offsets provides in vivo-like artifacts. Accompanying software can analyze the distributions and ranges of parameters in fitted datasets which allows researchers to tailor synthetic datasets to their clinical ones.
+_Abstract:_ 
+> This work introduces MRS-Sim, an open-source, publicly available in vivo-like data simulator for generating synthetic magnetic resonance spectroscopy data. Current literature shows inconsistencies and varying parameters in simulating data, making it difficult to generalize and reproduce results. MRS-Sim is a powerful tool for modeling the complexities of MRS data for various clinical scenarios. It uses high fidelity basis functions to simulate sequence- and vendor-specific acquisitions. The underlying physics model includes all spectral components commonly found in standard spectral fitting routines and some novel components. The first is a 3D _B<sub>0</sub>_ field map simulator to model _B<sub>0</sub>_ field inhomogeneities, ranging from slight variations to severe distortions. The second is a novel semi-parametric simulator that generates poorly characterized residual water region signal and baseline offset contributions. This framework can simulate everything between raw multi-coil transients and preprocessed coil-combined data. 
+> 
+> A repository of information has been compiled to help non-expert users with general simulation of MRS data. When simulating clinical-like datasets, it is important to be able to study the underlying ranges and statistical distributions of the simulation parameters of the clinical data. Therefore, accompanying software can analyze the distributions and ranges of parameters in fitted datasets, allowing simulations to be tailored to specific clinical data.
+> 
+> The modularity of this framework allows for easy customization of simulations to suit a variety of clinical scenarios and encourages continued community development. By simulating in vivo-like data, this framework can aid in many tasks in MRS, including verifying spectral fitting protocols and reproducibility analyses. The availability of readily available, synthetic data will also assist deep learning research for MRS, particularly in cases where clinical data is insufficient or unavailable for training. Providing easy access to high-quality synthetic data will help address reproducibility issues and make MRS research more accessible to a wider audience.
 
 # Model Overview
 <img src="https://github.com/JohnLaMaster/MRS-Sim/assets/7785925/9b835e36-039a-49d1-aa91-da2adb28071e" width="1000">
 
-
 # Basis Sets
-Currently, two basis sets will be uploaded. They are GE PRESS sequences with a spectral width of 2000, 8192 data points, and TE=30 & 144ms. Additional basis sets will be simulated and uploaded for Siemens and Philipps.
+Currently, two basis sets will be uploaded. They are GE PRESS sequences with a spectral width of 2000, 8192 data points, and TE=30 & 144ms. Additional basis sets will be add occasionally. I am currently switching from metabolite-level basis sets to spin-level basis sets to increase the spectral components that can be modeled. When that is finished, updated basis sets will be provided.
 
 # What makes this model special?
 There are several notable differences from standard simulation models. 
@@ -32,7 +36,8 @@ There are several notable differences from standard simulation models.
        spectral fitting packages are adding NIfTI-MRS compatability.
     2. All the steps in this model are in the opposite order of spectral fitting and processing. Therefore, all the  
        corresponding parameters are the actual correction values you would need to fit the spectra with a standard 
-       pipeline.
+       pipeline. However, when working in conjunction with in vivo data, it is better to fit the synthetic data
+       using the same protocol as the in vivo data.
     3. This model aims to always incorporate as many degrees of freedom as possible. The standard variables include 
        amplitudes, Lorentzian and Gaussian lineshapes, (naive) metabolite-level frequency shifts, global frequency 
        shifts, noise, zero- and first-order phase offsets, first-order eddy currents, and baseline signal 
@@ -41,10 +46,13 @@ There are several notable differences from standard simulation models.
        sensitivities. As more improvements to spectral fitting are discovered, they can be added to the model.
     4. On top of a rich baseline modeling, MM/Lip and residual water will be included. Fat/Lip peaks often have a 
        different frequency shift than the water components because they are less sensitive to temperature changes. 
-       Therefore, different frequency shifts are applied to the two groups. MM/Lip signal contributions are included 
-       via basis functions from Osprey.
+       Therefore, different frequency shifts are applied to the two groups. Separate Gaussian lineshape values are
+       also applied to the MM/Lip signal contributions. Originally these signals were included via basis functions 
+       from Osprey. However, the updated version of MARSS can now simulate them too and this will be integrated soon.
     5. A variety of quantification methods are built-in. Modulated basis function coefficients, area integration, 
-       peak heights, and ratios wrt a metabolite, or combination of metabolites, of choice are produced automatically.      
+       peak heights, and ratios wrt a metabolite, or combination of metabolites, of choice are produced automatically. 
+       These values are usefull for validating new methodologies, but should not be used in conjunction with in vivo
+       data as explained above.
     6. Template config files can be used to generate spectra that match those in the publication. An additional DL 
        template is included and is based on my experience. For instance, all (non-creatine) parameters have a 20% 
        chance of being omitted. In my work, this has helped DL models better learn the parameter representations by 
@@ -55,11 +63,22 @@ There are several notable differences from standard simulation models.
 The code and output files used to generate the samples for the manuscript are currently being added. Sample simulations are being added to the images folder.  
 
 # How to Contribute?
-## Code Base
-Would you like to add additional functionality to this software? Are you working with types of spectra that are not currently included? Please feel free to make a pull request. If you already have code that you would like to share, please reach out and we'll see about incorporating it. If you are writing code for this work, please make sure it is VERY well documented so we know how it fits into the repo and what the expected inputs and outputs are.
+## Code Base & New Clinical Scenarios
+Would you like to add additional functionality to this software? Are you working with types of spectra that are not currently included? Please feel free to make a pull request. Currently, MRS-Sim simulates collections of single voxel spectra. New additions could start with adding paired samples, i.e. a water reference (with eddy current) and a corresponding water suppressed signal or EDIT-ON/EDIT-OFF pairs for J-difference edited spectra. Eventually 2D and other MRS modalities can be developed too. If you already have code that you would like to share, please reach out and we'll see about incorporating it. If you are writing code for this work, please make sure it is VERY well documented so we know how it fits into the repo and what the expected inputs and outputs are.
 
 ## Fitting Parameters Dataset Collection
-An Open Science Framework project is currently being put together. The goal of this data repository is to collect the fitting parameters from a variety of clinical scenarios in order to develop a unified prior distribution that will be used to sample model parameters for MRS-Sim. The following is a brief overview:
+An Open Science Framework project is being put together. The goal of this data repository is to collect the fitting parameters from a variety of clinical scenarios in order to develop a unified prior distribution that will be used to sample model parameters for MRS-Sim. The end goal would be a more automated way to simulate physiologcal or pathology-specific datasets.
+
+## NMR Metabolite Database
+Simulation software only works with numerical values. While not the main focus of this work, a database has been compiled with spin definitions and corresponding concentrations and T2 values. I am also looking to include temperature- and pH-induced artifacts and to add X-nuclei as well. If you have literature suggestions or data yourself, please feel free to reach out so we can include it.
+
+# Working with the model
+If you use one of the provided configuration templates, please cite the paper below (citation will appear once published). If you would like to collaborate to create a dataset, please reach out at john.t.lamaster (at) gmail dot com.
+
+# Citation
+The appropriate citation will be provided once the manuscript has been accepted.
+<!--
+The following is a brief overview:
 
     1. Fit your data using Osprey and set the flag opts.exportParams.flag=1 and 
        then add the savedir to opts.exportParams.path='path/to/save/dir'
@@ -67,6 +86,3 @@ An Open Science Framework project is currently being put together. The goal of t
 Quality control procedures are still being developed. Once the SOP and logistics 
 have been finalized, the link to the repo will be posted here. Until then, if 
 you are interested in this portion of the project, please feel free to email me.
-
-# Working with the model
-If you use one of the provided configuration templates, please cite the following paper (citation will appear once published). If you would like to collaborate to create a dataset, please reach out at john.t.lamaster (at) gmail dot com.
