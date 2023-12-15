@@ -9,11 +9,13 @@ Graphical*.pdf
 /*.zip
 /*.pdf
 /Intro\ and\ Methods*
-*MRS_Sim_semi-final*
-*MRS_Sim_Final*
-*MRS_Sim_Supp*
-*MRS-Sim_Main_Manuscript*
-*MRS-Sim_pages*
+MRS-Sim_*.zip
+MRS-Sim_*.pdf
+MRS_Sim_semi-final*
+MRS_Sim_Final*
+MRS_Sim_Supp*
+MRS-Sim_Main_Manuscript*
+MRS-Sim_pages*
 temp.pdf
 /*latexdiff/
 /*images/
