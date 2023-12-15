@@ -1,3 +1,10 @@
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/JohnLaMaster/MRS-Sim)](https://github.com/JohnLaMaster/MRS-Sim/releases)
+[![GitHub Release Date](https://img.shields.io/github/release-date/JohnLaMaster/MRS-Sim)](https://github.com/JohnLaMaster/MRS-Sim/releases)
+![GitHub Maintained?](https://img.shields.io/badge/Maintained%3F-yes-brightgreen)
+[![GitHub commit activity](https://img.shields.io/github/commit-activity/m/JohnLaMaster/MRS-Sim?foo=bar)](https://github.com/JohnLaMaster/MRS-Sim/commits/develop)
+[![GitHub last commit](https://img.shields.io/github/last-commit/JohnLaMaster/MRS-Sim)](https://github.com/JohnLaMaster/MRS-Sim/commits/develop)
+[![License](https://img.shields.io/github/license/JohnLaMaster/MRS-Sim)](https://github.com/JohnLaMaster/MRS-Sim/LICENSE.md)
+
 <div align="center"><img src="https://github.com/JohnLaMaster/MRS-Sim/assets/7785925/7cbee3d1-084f-43e8-80ef-8ae3fee1b0e1" width="400"></div>
 
 # MRS-Sim: Open-Source Framework for Simulating Realistic, In Vivo-like Clinical Magnetic Resonance Spectra
