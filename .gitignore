@@ -1,8 +1,8 @@
 /*MRS-Sim_Main_Manuscript/
 /*MRS-Sim_rebuttal/
 /*MRS-Sim_Supplement/
-/Cover\ Letter.docx
-/Cover\ Letter.pdf
+/Cover*.docx
+/Cover*.pdf
 /Graphical*.docx
 /Graphical*.pdf
 /*.docx
@@ -18,4 +18,4 @@
 /*latexdiff/
 /*images/
 /*scratch*
-/remove/*
+/remove/
