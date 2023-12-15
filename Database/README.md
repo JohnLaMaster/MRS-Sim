@@ -10,7 +10,7 @@ Welcome to our database of NMR definitions and values relevant for simulating in
 - [Citations](https://docs.google.com/spreadsheets/d/e/2PACX-1vTFxppt3G4ZP4mQ9Il14yua0uN5AYPxJzMJnfNRVllg6k6dF24pwMSSxK9Mz2XJefZfPaepd4MQpOiA/pubhtml?gid=1870677180&single=true)
 
 Contributors:
-Ing. John T LaMaster
-Dr. Aaron Gudmundson
-Dr. Karl Landheer
-Dr. Ivan Tkac
+- Ing. John T LaMaster
+- Dr. Aaron Gudmundson
+- Dr. Karl Landheer
+- Dr. Ivan Tkac
