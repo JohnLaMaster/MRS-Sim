@@ -1029,6 +1029,7 @@ class PhysicsModel(nn.Module):
                           params: torch.Tensor, # [bS,5]
                          ) -> torch.Tensor:
         '''
+        Todo: FID?
         This formulation comes from Gudmundson 2023's benchmark dataset AGNOSTIC
         tau:   time constant; uniform(10ms,400ms)
         W:     gaussian decay rate; uniform(500Hz^2, 8000Hz^2)
@@ -1050,18 +1051,6 @@ class PhysicsModel(nn.Module):
                     self.frequency_shift(fid=alpha * torch.exp(-w * (t - tau).pow(2)),
                                          param=omega),
                                      phi0=phi)
-
-    def zero_order_phase(self, 
-                       fid: torch.Tensor, 
-                       phi0: torch.Tensor,
-                      ) -> torch.Tensor:
-        for _ in range(fid.ndim - phi0.ndim): phi0 = phi0.unsqueeze(-1)
-        return complex_exp(fid, -1*phi0.deg2rad())
-    def frequency_shift(self, 
-                        fid: torch.Tensor,      # torch.Size([bS, metab, (spins), channels, spec_length])
-                        param: torch.Tensor,    # torch.Size(bS, metab * self.num_spins)
-                        t: torch.Tensor=None,
-                       ) -> torch.Tensor:
 
     
     def quantify_metab(self, 
@@ -1228,6 +1217,7 @@ class PhysicsModel(nn.Module):
 
         return out, baselines, res_water
 
+    
     
     def zero_fill(self,
                   fidSum: torch.Tensor,
