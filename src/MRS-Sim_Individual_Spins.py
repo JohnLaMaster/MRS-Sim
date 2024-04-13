@@ -17,7 +17,7 @@ import sys
 import numpy as np
 import scipy.io as io
 import torch
-from aux import normalize, load_default_values
+from aux import normalize_old, load_default_values
 from mainFcns import _save, prepare, simulate
 from types import SimpleNamespace
 
@@ -39,14 +39,19 @@ def sample(inputs):
     # This script assumes uniform distribution, however, other distributions
     # can be defined after this.
     params = torch.ones((totalEntries, ind['overall'][-1]+1)).uniform_(0,1)
-    params = normalize(params, dims=-1) 
+    params = normalize_old(params, dims=-1) 
     # normalize converts the range from [0,1) to [0,1].
     
     # # Load updated default values for spins and metabolites
-    T2_min, T2_max = load_default_values(config.default_values, pm=pm, quant="T2", spins=True)
+    T2_min, T2_max = load_default_values(config.default_values, pm=pm, quant="T2", spins=False)
+    print('T2_min: {}'.format(T2_min))
+    print('T2_max: {}'.format(T2_max))
     conc_min, conc_max = load_default_values(config.default_values, pm=pm, quant="Conc", spins=False)
-    pm.set_parameter_constraints({"d": {"min": 1/(T2_min/1e3), "max": 1/(T2_max/1e3)}})
-    pm.set_parameter_constraints({met: {"min": conc_min[i], "max": conc_max[i]} for i, met in enumerate(pm._metab)})
+    pm.set_parameter_constraints({"d": [1/(T2_max/1e3), 1/(T2_min/1e3)]})
+    print(conc_min, conc_min.shape, len(pm._metab))
+    print(pm._metab)
+    print({met: [conc_min[i], conc_max[i]] for i, met in enumerate(pm._metab)})
+    pm.set_parameter_constraints({met: [conc_min[i], conc_max[i]] for i, met in enumerate(pm._metab)})
 
     # Quantify parameters
     params = pm.quantify_params(params)

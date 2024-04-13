@@ -6,9 +6,9 @@ from collections import OrderedDict
 
 import numpy as np
 from scipy.io import savemat as io_savemat
-from src.aux import sample_baselines, sample_resWater, sort_parameters
-from src.NIfTIMRS import Mat2NIfTI_MRS
-from src.physics_model import PhysicsModel
+from aux import sample_baselines, sample_resWater, sort_parameters
+from NIfTIMRS import Mat2NIfTI_MRS
+from physics_model import PhysicsModel
 from types import SimpleNamespace
 
 __all__ = ['prepare', '_save', 'simulate']
@@ -48,7 +48,7 @@ def prepare(config_file):
                   ppm_ref=config.ppm_ref,
                   spectral_resolution=config.spectral_resolution,
                   spectralwidth=config.spectralwidth,
-                  snr_metab=config.snr_metab,
+                #   snr_metab=config.snr_metab,
                   wrt_metab=config.wrt_metab)
     config.header = pm.header
 

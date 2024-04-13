@@ -9,7 +9,7 @@ import scipy.io as io
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.interpolate import CubicHermiteMAkima as CubicHermiteInterp
+from interpolate import CubicHermiteMAkima as CubicHermiteInterp
 # from pm_v3 import PhysicsModel
 from torch.fft import fft, fftshift, ifft, ifftshift, irfft, rfft
 from types import SimpleNamespace
@@ -19,7 +19,7 @@ __all__ = ['batch_linspace', 'batch_smooth', 'complex_exp', 'concat_dict',
            'HilbertTransform', 'inv_Fourier_Transform', 'normalize', 
            'OrderOfMagnitude', 'rand_omit', 'sample_baselines', 
            'sample_resWater', 'sim2acquired', 'sort_parameters', 
-           'torch2numpy', 'unwrap']
+           'torch2numpy', 'unwrap', 'normalize_old']
 
 
 PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
@@ -220,10 +220,15 @@ def inv_Fourier_Transform(signal: torch.Tensor,
 
 
 def normalize_old(tensor: torch.Tensor, dims=tuple) -> torch.Tensor:
-    denom = torch.amax(tensor, dim=dims, keepdims=True).values - \
-                torch.amin(tensor, dim=dims, keepdims=True).values
+    # a = torch.amax(tensor, dim=dims, keepdims=True)#.values()
+    # b = torch.amin(tensor, dim=dims, keepdims=True)#.values()
+    # print(type(a), type(b))
+    denom = torch.amax(tensor, dim=dims, keepdims=True) - \
+                torch.amin(tensor, dim=dims, keepdims=True)
+    # denom = torch.amax(tensor, dim=dims, keepdims=True).values - \
+    #             torch.amin(tensor, dim=dims, keepdims=True).values
     return (tensor - torch.amin(tensor.abs(), dim=dims, 
-                                keepdims=True).values) / denom
+                                keepdims=True)) / denom
 
 
 # Source: https://stackoverflow.com/questions/52859751/most-efficient-way-to-find-order-of-magnitude-of-float-in-python
@@ -270,6 +275,8 @@ def prepareConfig(N: int, cfg: dict) -> dict:#, pt_density: int):
         'scale': torch.ones(N,1,1).uniform_(cfg['scale'][0],
                                             cfg['scale'][1]),
         'rand_omit': cfg['drop_prob'],
+        'start_prime': cfg['start_prime'] if 'start_prime' in cfg.keys() else torch.zero(1),
+        'end_prime': cfg['end_prime'] if 'end_prime' in cfg.keys() else torch.zero(1),
     }
 
 
@@ -297,9 +304,11 @@ def load_default_values(path: str, pm: nn.Module, quant: str="T2", spins: bool=F
     key = "spins" if spins else "metab"
     with open(path) as file:
         values = json.load(file)
+    # print(values.keys())
     
     num_spins = pm._num_spins
-    end = len(pm.spins) - 1
+    end = len(pm.spins)# - 1
+    # print('num_spins {}, end {}'.format(num_spins, end))
     
     minimum = torch.zeros(end)
     maximum = torch.zeros(end)
@@ -307,10 +316,18 @@ def load_default_values(path: str, pm: nn.Module, quant: str="T2", spins: bool=F
     metabs, _ = pm.metab
 
     for i, ind in enumerate(range(0,end,num_spins)):
-        met = values[metabs[i]][quant][key]
-        for n in range(0,len(met["min"])):
-            minimum[:,ind+n] = met["min"][n]
-            maximum[:,ind+n] = met["max"][n]
+        print(metabs[i].lower())
+        try:
+            met = values[metabs[i].lower()][quant][key] if "t2" in quant.lower() else values[metabs[i].lower()][quant]
+            # print(metabs[i].lower(), quant, key, met["min"], len(met["min"]))
+            # print('length of list: ',len(met["min"]))
+            for n in range(0,len(met["min"])):
+                print(n, ind+n)
+                minimum[ind+n] = met["min"][n] #if met["min"][n].ndim>1 else met["min"]
+                maximum[ind+n] = met["max"][n] #if met["max"][n].ndim>1 else met["max"]
+        except KeyError:
+            pass
+        
     return minimum, maximum
 
 

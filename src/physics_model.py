@@ -9,9 +9,9 @@ import scipy.io as io
 import torch
 import torch.nn as nn
 from numpy import pi
-from src.aux import *
-from src.baselines import bounded_random_walk
-from src.interpolate import CubicHermiteMAkima as CubicHermiteInterp
+from aux import *
+from baselines import bounded_random_walk
+from interpolate import CubicHermiteMAkima as CubicHermiteInterp
 from types import SimpleNamespace
 
 __all__ = ['PhysicsModel']
@@ -35,8 +35,10 @@ class PhysicsModel(nn.Module):
         # Load basis spectra, concentration ranges, and units
         paths = ['./src/basis_sets/' + PM_basis_set, # 'fitting_basis_ge_PRESS144.mat'
                  './src/basis_sets/artifacts.mat',
-                 './src/basis_sets/ranges_{}ms.mat'.format(TE)]
+                 './src/basis_sets/ranges_30ms.mat']#,
+                #  './src/basis_sets/ranges_{}ms.mat'.format(TE)]
         self.basisFcns = {}
+        self.PM_basis_set = PM_basis_set
 
         for path in paths:
             with open(path, 'rb') as file:
@@ -60,7 +62,7 @@ class PhysicsModel(nn.Module):
         
     def __repr__(self):
         lines = sum([len(listElem) for listElem in self.totals])   
-        out = 'MRS-Sim(basis={}, lines={}'.format(PM_basis_set, lines)
+        out = 'MRS-Sim(basis={}, lines={}'.format(self.PM_basis_set, lines)
         return out + ', range={}ppm, resample={}pts)'.format(self.cropRange, 
                                                              self.length)
     
@@ -87,6 +89,10 @@ class PhysicsModel(nn.Module):
             cropped: bool=False
            ) -> torch.Tensor:
         return self._ppm if not cropped else self.ppm_cropped
+
+    # @property
+    # def ppm_cropped(self) -> torch.Tensor:
+    #     return self.ppm_cropped
 
     @property
     def spins(self):
@@ -249,6 +255,7 @@ class PhysicsModel(nn.Module):
 
 
 
+        # print('PM.: ',l,l*self.num_spins, self.MM)
         # Should be a global fshift then individual metabolites 
         # and MM/Lip fsfhitfs
         names.append('d'),                  mult.append(l*self.num_spins)
@@ -1186,10 +1193,13 @@ class PhysicsModel(nn.Module):
 
         for k, ind in self._index.items():
             if k in cfg_keys:
+                # print(k, ind)
                 if isinstance(ind, tuple):
-                    for i in ind:
-                        self.min_ranges[:,i] = cfg[k][0]
-                        self.max_ranges[:,i] = cfg[k][1]
+                    print(cfg[k][0], type(cfg[k][0]))
+                    print(len(ind), ind, [x for x in range(len(ind))])
+                    for i, ii in zip(ind, range(len(ind))):
+                        self.min_ranges[:,i] = cfg[k][0] if not torch.is_tensor(cfg[k][0]) else cfg[k][0][ii]
+                        self.max_ranges[:,i] = cfg[k][1] if not torch.is_tensor(cfg[k][1]) else cfg[k][1][ii]
                 else:
                     self.min_ranges[:,ind] = cfg[k][0]
                     self.max_ranges[:,ind] = cfg[k][1]
