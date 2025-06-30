@@ -9,6 +9,7 @@ import scipy.io as io
 import torch
 from aux import *
 from physics_model import PhysicsModel
+from types import SimpleNamespace
 
 sys.path.append('../')
 # import torch.nn as nn

@@ -9,10 +9,11 @@ import scipy.io as io
 import torch
 import torch.nn as nn
 from numpy import pi
-from aux import *
-from baselines import bounded_random_walk
-from interpolate import CubicHermiteMAkima as CubicHermiteInterp
+from .aux import *
+from .baselines import bounded_random_walk
+from .interpolate import CubicHermiteMAkima as CubicHermiteInterp
 from types import SimpleNamespace
+from typing import List, Tuple
 
 __all__ = ['PhysicsModel']
 
@@ -335,24 +336,24 @@ class PhysicsModel(nn.Module):
 
 
         # Define the remaining dictionary keys
-        dct.update({'D': torch.empty(1), 
-                    'G': torch.empty(1), 
-                    'F_Shift': torch.empty(1)})
-        dct.update({'F_Shifts': torch.empty(1)})
-        dct.update({'SNR': torch.empty(1), 
-                    'Phi0': torch.empty(1), 
-                    'Phi1': torch.empty(1)})
-        dct.update({'B0': torch.empty(1), 
-                    'B0_dir': torch.empty(1)})
-        dct.update({'ECC': torch.empty(1)})
-        dct.update({'Coil_SNR': torch.empty(1)})
-        dct.update({'Coil_Sens': torch.empty(1)})
+        dct.update({'D':           torch.empty(1), 
+                    'G':           torch.empty(1), 
+                    'F_Shift':     torch.empty(1)})
+        dct.update({'F_Shifts':    torch.empty(1)})
+        dct.update({'SNR':         torch.empty(1), 
+                    'Phi0':        torch.empty(1), 
+                    'Phi1':        torch.empty(1)})
+        dct.update({'B0':          torch.empty(1), 
+                    'B0_dir':      torch.empty(1)})
+        dct.update({'ECC':         torch.empty(1)})
+        dct.update({'Coil_SNR':    torch.empty(1)})
+        dct.update({'Coil_Sens':   torch.empty(1)})
         dct.update({'Coil_fShift': torch.empty(1)})
-        dct.update({'Coil_Phi0': torch.empty(1)})
+        dct.update({'Coil_Phi0':   torch.empty(1)})
         dct.update({'Temperature': torch.empty(1)})
         dct.update({'Metabolites': torch.empty(1), 
-                    'Parameters': torch.empty(1), 
-                    'Overall': torch.empty(1)})
+                    'Parameters':  torch.empty(1), 
+                    'Overall':     torch.empty(1)})
         
         # Combine and define the index for internal use in the model
         self._index = OrderedDict({d.lower(): i for d,i in zip(dct.keys(),ind)})
@@ -360,7 +361,7 @@ class PhysicsModel(nn.Module):
         return dct, ind
 
     def define_parameter_ranges(self,
-                                header: list[str]) -> None:
+                                header: List[str]) -> None:
         self.min_ranges = torch.zeros([1,len(header)], dtype=torch.float32)
         self.max_ranges = torch.zeros_like(self.min_ranges)
         for i, m in enumerate(header):
@@ -394,17 +395,89 @@ class PhysicsModel(nn.Module):
     
     def add_inhomogeneities(self,
                             fid: torch.Tensor,
-                            B0: torch.Tensor
+                            B0: torch.Tensor,
+                            # param: torch.Tensor,
                            ) -> torch.Tensor:
         '''
         This adds the B0 field effects and allows the FIDs to be individual
         moieties- or metabolite-level.
         '''
+        # B0 = self.B0_inhomogeneities(b0=b0, param=param)
+        # print('fid.shape = {}, B0.shape = {}'.format(fid.shape,B0.shape))
         for _ in range(fid.ndim - B0.ndim): B0 = B0.unsqueeze(1)
+        # B0 = Fourier_Transform(torch.view_as_real(B0.squeeze(-2).contiguous()).transpose(-1,-2))
+        # temp = 
+        # original = torch.view_as_complex(Fourier_Transform(fid).transpose(-1,-2).contiguous()).sum(dim=1,keepdims=True).abs().sum(dim=-1, keepdims=True).unsqueeze(-1)
+
+        # print('fid.shape = {}, B0.shape = {}'.format(fid.shape,B0.shape))
         # # B0.shape = torch.Size([5, 1, 2, 8192])
         # # data.shape = torch.Size([5, 26, 2, 8192])
         # # output.shape = torch.Size([5, 26, 2, 8192])
-        return fid * B0
+        fid = torch.view_as_complex(fid.transpose(-1,-2).contiguous()).unsqueeze(-2)
+        # # B0 = torch.view_as_complex(B0.transpose(-1,-2).contiguous()).unsqueeze(-2)
+        # print('fid.shape {}, B0.shape {}'.format(fid.shape,B0.shape))
+        # print('fid[...,0]: {}'.format(fid[0:7,0,0,0].squeeze()))
+        # # # Normalize the area under the curve of the basis functions
+        # # original = fid.sum(dim=1,keepdims=True).abs().sum(dim=-1, keepdims=True)#.unsqueeze(-1)
+        out = fid * B0
+        # print('out[...,0]: {}'.format(out[0:7,0,0,0].squeeze()))
+        out = torch.view_as_real(out.squeeze(-2)).transpose(-1,-2).contiguous()
+        
+        # fid, B0 = fid.squeeze(-2), B0.squeeze(-2)
+        # out = torch.zeros_like(fid)
+        # for i in range(int(fid.shape[0])):
+        #     f = fid[i,...].unsqueeze(0)
+        #     b = B0[i,...].repeat(int(f.shape[1]),1).unsqueeze(1)
+        #     out[i,...] = torch.nn.functional.conv1d(f, b, stride=1, padding='same', groups=int(fid.shape[1]))
+
+
+        # # Ensure normalization
+        # # original = temp.sum(dim=1,keepdims=True).abs().sum(dim=-1, keepdims=True)#.unsqueeze(-1)
+        # temp = torch.view_as_complex(Fourier_Transform(torch.view_as_real(out).transpose(-1,-2).contiguous()).transpose(-1,-2).contiguous())
+        # print('ORIGINAL:: temp.shape {}'.format(original.shape))
+        # print('NEW:: temp.shape {}'.format(temp.shape))
+        # new = temp.sum(dim=1,keepdims=True).abs().sum(dim=-1, keepdims=True)#.unsqueeze(-1)
+        
+        # # Normalize
+        # print('out.shape {}'.format(out.shape))       
+        # out = Fourier_Transform(torch.view_as_real(out.squeeze(-2)).transpose(-1,-2).contiguous()) 
+        # print('out.shape {}'.format(out.shape))   
+        # print('original.shape {}, new.shape {}'.format(original.shape, new.shape))    
+        # # out = torch.view_as_complex(out.transpose(-1,-2).contiguous()).div(new).mul(original)
+        # # print('out.shape {}'.format(out.shape))       
+        # # out = torch.view_as_complex(out.transpose(-1,-2).contiguous()).unsqueeze(-2)
+        # # print('out.shape {}'.format(out.shape))
+        # # # out = out.div(new)
+        # # # print('out.div().shape {}'.format(out.shape))
+        # # # out = out.mul(original).squeeze(-2)
+        # # # print('out.mul().shape {}'.format(out.shape))       
+        # out = inv_Fourier_Transform(torch.view_as_real(out).transpose(-1,-2).contiguous())
+        # # # 
+        
+        # out = torch.nn.functional.conv1d(fid, B0.repeat_interleave(repeats=int(fid.shape[1]),dim=1), stride=1, padding='same', groups=int(fid.shape[1]))
+        # print('out.shape AFTER convolution = {}'.format(out.shape))
+        # out = torch.view_as_real(out).transpose(-1,-2).contiguous()
+        # out = inv_Fourier_Transform(out)
+        # new = out.sum(dim=1,keepdims=True).abs().sum(dim=-1, keepdims=True)#.unsqueeze(-1)
+        # print('original.shape {}, new.shape {}'.format(original.shape, new.shape))
+        # print('original[0,:,0,0] {}, new[0,:,0,0] {}'.format(original[0,:,0,0], new[0,:,0,0]))
+        # scale = original / new # new/original#
+        # for _ in range(fid.ndim - scale.ndim): scale = scale.unsqueeze(-1)
+        # print('original.shape {}, scale.shape {}, out.shape {}'.format(original.shape, scale.shape, out.shape))
+        # check0 = (original[0,:,0,0].abs()<new[0,:,0,0].abs())
+        # check1 = (original[0,:,0,0].abs()>new[0,:,0,0].abs())
+        # check2 = (original[0,:,0,0].abs()==new[0,:,0,0].abs())
+        # print('check0: ',check0)
+        # print('check1: ',check1)
+        # print('check2: ',check2)
+        # temp = out.div(new)
+        # out = out.div(new).mul(original)# * scale
+        # check3 = (out[0,:,0,0].abs().sum(dim=-1,keepdims=True)<original[0,:,0,0].abs().sum(dim=-1,keepdims=True))
+        # print('check3: ',check3)
+        # out = torch.view_as_real(out).transpose(-1,-2).contiguous()
+        return out
+
+#        return fid * B0
 
 
     def add_offsets(self,
@@ -447,7 +520,7 @@ class PhysicsModel(nn.Module):
 
     def baselines(self,
                   config: dict,
-                 ) -> tuple():
+                 ) -> Tuple:
         '''
         Simulate baseline offsets
         '''
@@ -488,6 +561,7 @@ class PhysicsModel(nn.Module):
     
     
     def B0_inhomogeneities(self, 
+#                            fid: torch.Tensor,
                            b0: torch.Tensor,
                            param: torch.Tensor, # hz
                           ) -> torch.Tensor:
@@ -544,19 +618,56 @@ class PhysicsModel(nn.Module):
         # dB0.shape = [bS, length, length, length]
         # # output.shape = [bS, 1, length^3, 1] * [1, 1, 1, 8192] 
         # #                => [bS, 1, length^3, 8192]
+        
+        # fid = torch.view_as_complex(fid.transpose(-1,-2).contiguous()).unsqueeze(-2)
+
+        # Pre-calculate constant 2*pi on the same device and dtype as t
+        two_pi = 2 * torch.as_tensor(torch.pi).to(t.device).to(t.dtype)
+        # Average over the spatial grid
+        # n_spatial = dB0.shape[-3] * dB0.shape[-2] * dB0.shape[-1]
 
         # Let's make a for-loop to iterate over the voxel z- and y-dimensions
-        identity, out = torch.ones_like(t).repeat(1,1,2,1), 0
+        # identity, out = torch.ones_like(t).repeat(1,1,2,1), 0
+# #         identity, out = torch.ones_like(t).repeat(1,1,1,1), 0
+        out = torch.zeros(dB0.shape[0], t.shape[1], t.shape[-1], device=t.device, dtype=torch.cfloat)
         for i in range(dB0.shape[-1]): # z-dimension
-            for j in range(dB0.shape[-2]): # y-dimension
-                temp = dB0[...,j,i].unsqueeze(-1).unsqueeze(-1)
-                temp = temp.unsqueeze(1).flatten(start_dim=2, end_dim=-1)
-                temp = temp.unsqueeze(-1) * t
-                out += complex_exp(identity,
-                               -1*temp.unsqueeze(-2).deg2rad()).sum(dim=-3)
+            # for j in range(dB0.shape[-2]): # y-dimension
+            # temp = dB0[...,j,i].unsqueeze(-1).unsqueeze(-1) # pbS, length, length, length] => 
+            temp = dB0[...,i].unsqueeze(-1).unsqueeze(-1) # pbS, length, length, length] => 
+            temp = temp.unsqueeze(1).flatten(start_dim=2, end_dim=-1) # [bS, 1, length, 1^2] => 
+            temp = temp.unsqueeze(-1) * t # [bS, 1, length, 1] => [bS, 1, length, 8192]
+            out += torch.sum(torch.exp(1j*two_pi*temp), dim=-2)
+# # # #             out += torch.sum(torch.exp(-1j*temp.deg2rad()), dim=-2)
+                # out += complex_exp(identity,
+                #                -1*temp.unsqueeze(-2).deg2rad()).sum(dim=-3)
         del temp
+#         print('out.shape: {}'.format(out.shape))
+#         out = torch.view_as_real(out.transpose(-1,-2).squeeze(-1)).transpose(-1,-2).unsqueeze(1).contiguous()
+##        print('out.shape: {}'.format(out.shape))
+##        print('fid.shape: {}'.format(fid.shape))
         # Eqn 4 in Ningzhi Li 2015, "Spectral fitting using basis set..."
-        return out
+#         out = Fourier_Transform(out).transpose(-1,-2).contiguous()
+#         fid = Fourier_Transform(fid).transpose(-1,-2).contiguous()
+#         print('out.shape: {}'.format(out.shape))
+#         print('fid.shape: {}'.format(fid.shape))
+#         out = torch.view_as_complex(out)
+##        fid = torch.view_as_complex(fid.transpose(-1,-2).contiguous()).unsqueeze(-2)
+##        print('out.shape: {}'.format(out.shape))
+##        print('fid.shape: {}'.format(fid.shape))
+# #         out = out.unsqueeze(1) / n_spatial * fid
+        out = out.unsqueeze(1)
+        norm = out[...,0].unsqueeze(-1)#.mul(2)
+        # out = out / norm
+        print('out[...,0]: {}'.format(out[0:7,...,0].squeeze()))
+##        print(out[0,0,0,0:15].squeeze())
+##        print(out.real.max(dim=-1))
+#         out = out * fid
+##        print('out.shape: {}'.format(out.shape))
+#         out = torch.view_as_real(out).transpose(-1,-2).contiguous()
+##        print('out.shape: {}'.format(out.shape))
+#         out = inv_Fourier_Transform(out)
+#         out = inv_Fourier_Transform(Fourier_Transform(out) * Fourier_Transform(fid)) # JTL 13.02.25
+        return out #torch.view_as_real(out).transpose(-2,-1) # / dB0.numel() # JTL 13.02.25 todo: Is this necessary?
 
 
     def coil_freq_drift(self,
@@ -696,10 +807,10 @@ class PhysicsModel(nn.Module):
             
         for _ in range(fid.ndim - param.ndim): param = param.unsqueeze(-1)
         for _ in range(fid.ndim - t.ndim): t = t.unsqueeze(0)
-        if fid.ndim==5:
-            # Reshape if individual spins
-            new_shape = [s[0], len(self.spins), self.num_spins, 1]
-            param = param.view(new_shape)
+        # if fid.ndim==5:
+        #     # Reshape if individual spins
+        #     new_shape = [s[0], len(self.spins), self.num_spins, 1]
+        #     param = param.view(new_shape)
 
         # Convert frequency shift from ppm to Hz
         # print('frequency_shift: ',param[:,0])
@@ -1279,34 +1390,51 @@ class PhysicsModel(nn.Module):
                 coil_fshift: bool=False,
                 residual_water: dict=None,
                 drop_prob: float=None,
-                presim: dict=None
+                presim: dict=None,
+                snr_filter: float=False,
                ) -> torch.Tensor:
         if params.ndim==1: params = params.unsqueeze(0) # Allows batchSize = 1
 
         # B0 inhomogeneities
         if b0:
-            if gen: print('>>>>> Simulating B0 field heterogeneities')
-            # Memory limitations require this to be calculated either before 
-            # or after the spectra
+        #     if gen: print('>>>>> Simulating B0 field heterogeneities')
+        #     # Memory limitations require this to be calculated either before 
+        #     # or after the spectra
             B0 = self.B0_inhomogeneities(b0=params[:,self.index['b0']],
                                          param=params[:,self.index['b0_dir']])
 
         # Simulate the Residual Water and Baselines
         if offsets:
+            check1, check2 = False, False
             if gen: print('>>>>> Generating Baseline/Residual Water offsets')
-            if isinstance(presim,type(None)):
+            if not isinstance(presim['baseline'],type(None)): baselines, check1 = None, True
+            if not isinstance(presim['reswater'],type(None)): residual_water, check2 = None, True
+            if not check1 or not check2:
                 offset = self.simulate_offsets(baselines=baselines, 
-                                               residual_water=residual_water, 
-                                               drop_prob=drop_prob)
-            elif isinstance(presim,dict):
+                                                residual_water=residual_water, 
+                                                drop_prob=drop_prob)
+                if check1: 
+                    offset[0] += presim['baseline']
+                    offset[1]  = presim['baseline']
+                if check2:
+                    offset[0] += presim['reswater']
+                    offset[2]  = presim['reswater']
+            # elif isinstance(presim,dict):
+            elif (check1 and check2):
                 offset = tuple([presim['baseline'] + presim['reswater'], presim['baseline'], presim['reswater']])
+                
+            # else:
+            #     offset = tuple([presim['baseline'] + presim['reswater'], presim['baseline'], presim['reswater']])
                 # offset = torch.from_numpy(offset)
 
         # Define basis spectra coefficients
         if gen: print('>>>>> Preparing metabolite coefficients')
         fid = self.modulate(fids=self.syn_basis_fids, 
                             params=params[:,self.index['metabolites']])
+        print('modulate:: fid[...,0]: {}'.format(fid[0:7,0,0,0].squeeze()))
+        print('modulate params: ',params[0:7,self.index['metabolites'][0]])
         # fid.shape = torch.Size([bS, num_basisfcns, (num_moieties), 2, spec_length])
+        # fid.shape = torch.Size([bS, num_basisfcns, 2, spec_length])
 
 
         '''
@@ -1317,17 +1445,26 @@ class PhysicsModel(nn.Module):
                                params=diff_edit[:,self.index['metabolites']])),
                               dim=1)
         '''
-
-        # Apply B0 inhomogeneities
-        if b0: 
-            if gen: print('>>>>> Applying B0 field distortions')
-            fid = self.add_inhomogeneities(fid, B0)
         
         # Line broadening
         if broadening:
             if gen: print('>>>>> Applying line shape distortions')
             fid = self.lineshape_correction(fid=fid, d=params[:,self.index['d']], 
                                                      g=params[:,self.index['g']])
+            print('broaden:: fid[...,0]: {}'.format(fid[0:7,0,0,0].squeeze()))
+
+        # Apply B0 inhomogeneities
+        print('b0: ',b0)
+        if b0:                                                            
+            if gen: print('>>>>> Applying B0 field distortions')
+            fid = self.add_inhomogeneities(fid=fid, B0=B0)#b0=params[:,self.index['b0']], param=params[:,self.index['b0_dir']])
+            # fid = self.B0_inhomogeneities(fid=fid,
+            #                               b0=params[:,self.index['b0']],
+            #                               param=params[:,self.index['b0_dir']])
+            
+        # Filter the basis functions for the ground truth 
+        if snr_filter:
+            filter_peak_heights = fid[...,0,:].abs().amax(dim=-1).unsqueeze(-2)
 
         # Basis Function-wise Frequency Shift
         if fshift_i:
@@ -1343,6 +1480,25 @@ class PhysicsModel(nn.Module):
         fidSum, spectral_fit, mx_values = self.line_summing(fid=fid, 
                                                             params=params, 
                                                             mm=self.MM)
+        
+        # SNR filtering
+        if noise:
+            if gen: print('>>>>> Adding noise')
+            noise_vec, d = self.generate_noise(fid=fidSum, 
+                                           max_val=mx_values, 
+                                           param=params[:,self.index['snr']], 
+                                           zeros=params[:,self.index['coil_sens']], # num of zeroed out coils
+                                           transients=params[:,self.index['coil_snr']],
+                                           uncorrelated=True)
+            if snr_filter:
+                std = noise_vec.std(dim=-1, keepdims=True).unsqueeze(1)
+                # for _ in range(noise_vec.ndim - filter_peak_heights.ndim): filter_peak_heights = filter_peak_heights.unsqueeze(1)
+                filters = (filter_peak_heights / std > snr_filter).long()
+                filtered = fid[filters]
+                fidSum = torch.stack([fidSum, filtered.sum(dim=1)], dim=d)
+                spectral_fit = fidSum.clone()
+                # fidSum.shape = [bS, (syn / filtered), 2, spec_length]
+            
 
         # Add the Residual Water and Baselines
         if offsets:
@@ -1363,17 +1519,18 @@ class PhysicsModel(nn.Module):
         # Add Noise
         if noise:
             if gen: print('>>>>> Adding noise')
-            noise, d = self.generate_noise(fid=fidSum, 
-                                           max_val=mx_values, 
-                                           param=params[:,self.index['snr']], 
-                                           zeros=params[:,self.index['coil_sens']], # num of zeroed out coils
-                                           transients=params[:,self.index['coil_snr']],
-                                           uncorrelated=True)
-            fidSum = torch.stack((fidSum.clone() + noise, fidSum), dim=d)
-            spectral_fit = torch.stack((spectral_fit.clone() + noise, 
+            # noise, d = self.generate_noise(fid=fidSum, 
+            #                                max_val=mx_values, 
+            #                                param=params[:,self.index['snr']], 
+            #                                zeros=params[:,self.index['coil_sens']], # num of zeroed out coils
+            #                                transients=params[:,self.index['coil_snr']],
+            # #                                uncorrelated=True)
+            fidSum = torch.stack((fidSum[...,0,:,:].clone().unsqueeze(-3) + noise_vec, fidSum + noise_vec), dim=d)
+            # fidSum = torch.stack((fidSum[...,0,:,:].clone().unsqueeze(-3) + noise_vec, fidSum), dim=d)
+            spectral_fit = torch.stack((spectral_fit[...,0,:,:].clone().unsqueeze(-3) + noise_vec, 
                                         spectral_fit), dim=d)
             # Keep both noisey transients and clean transients
-            # output.shape: [bS, ON\OFF, [noisy/clean], transients, channels, length]
+            # output.shape: [bS, ON\OFF, [noisy/clean/clean_filt], transients, channels, length]
             #                    transients, channels, length]
 
         # Scale with coil senstivities
@@ -1482,6 +1639,9 @@ class PhysicsModel(nn.Module):
         else:
             specSummed, denom = self.normalize(signal=specSummed)
         spectral_fit, _ = self.normalize(signal=spectral_fit, denom=denom)
+
+        specSummed *= denom
+        spectral_fit *= denom
 
         # Convert normalized spectra back to time-domain
         if fids and resample:

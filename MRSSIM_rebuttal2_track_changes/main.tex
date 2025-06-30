@@ -1,0 +1,123 @@
+\documentclass[AMA,LATO1COL]{WileyNJD-v2}
+
+\RequirePackage{ulem}
+\articletype{Article Type}%
+
+\usepackage{pgf}
+\usepackage{enumitem}
+\usepackage{subfiles}
+
+\usepackage{placeins}
+
+\usepackage{longtable}
+\usepackage{makecell}
+
+\received{01 July 2023}
+% \revised{6 June 2023}
+% \accepted{6 June 2023}
+
+\raggedbottom
+
+\newcommand\todo[1]{\textcolor{red}{#1}}
+
+\newcommand\lowcomma{%
+\settoheight{\commaheight}{\text{,}}%
+\mathpunct{\adjustbox{valign=b,raise=-\commaheight}{\text{,}}}%
+}
+
+\usepackage[acronym]{glossaries}
+\renewcommand{\glossarysection}[2][]{}
+\makeglossaries
+
+
+\begin{document}
+
+\title{MRS-Sim: Open-Source Framework for Simulating In Vivo-like Magnetic Resonance Spectra\protect}
+
+\author[1,2]{John LaMaster*}
+
+\author[3]{Georg Oeltzschner}
+
+\author[4]{Yan Li}
+
+\authormark{J. LaMaster \textsc{et al.}}
+
+
+\address[1]{\orgdiv{Munich Institute of Biomedical Engineering}, \orgname{Technical University of Munich}, \orgaddress{\state{Bavaria}, \country{Germany}}}
+
+\address[2]{\orgdiv{School of Computation, Information, and Technology}, \orgname{Technical University of Munich}, \orgaddress{\state{Bavaria}, \country{Germany}}}
+
+\address[3]{\orgdiv{Russel H. Morgan Department of Radiology and Radiological Sciences}, \orgname{The Johns Hopkins' University School of Medicine}, \orgaddress{\state{Maryland}, \country{USA}}}
+
+\address[4]{\orgdiv{Department of Radiology and Biomedical Imaging}, \orgname{University of California, San Francisco}, \orgaddress{\state{California}, \country{USA}}}
+
+\corres{John LaMaster. \\\email{john.t.lamaster@gmail.com} \\Twitter: @JohnTLaMaster}
+
+\presentaddress{Munich Institute of Biomedical Engineering, School of Computation, Information, and Technology, Technical University of Munich in the City of Garching bei München, Boltzmannstr 11. 85748 Garching bei München, Bavaria, Germany.}
+
+\abstract[Summary]{MRS-Sim is a powerful, open-source framework for simulating in vivo-like magnetic resonance spectroscopy data. Its modularity allows it to model the complexities of MRS data for a variety of clinical scenarios. The underlying physical equations include spectral components commonly found in linear-combination fitting routines plus some novel components. The first is a 3D $B_0$ field map simulator to model $B_0$ field inhomogeneities, ranging from slight variations to severe distortions. The second is a novel semi-parametric generator that mimics signals from poorly characterized residual water regions and baseline offset contributions. This framework can simulate everything from raw multi-coil transients to preprocessed coil-combined data. 
+
+A repository of information has been compiled to help non-expert users with general simulations of MRS data. Simulating realistic clinical-like datasets requires appropriate ranges and distributions for the model parameters, which are best determined by analyzing the parameter estimates from fitting real clinical data. Therefore, accompanying tools within MRS-Sim allow for analyzing the range and distributions of those parameters from in vivo datasets fitted with Osprey. This allows simulations to be tailored to specific clinical datasets.
+
+The modularity of this framework allows for easy customization of simulations to suit a variety of clinical scenarios and encourages continued community development. Using a single framework for various scenarios overcomes the inconsistent protocols in current literature. By simulating in vivo-like data, this framework can aid in many tasks in MRS, including verifying spectral fitting protocols and reproducibility analyses. The accessibility of readily available, synthetic data will also assist deep learning research for MRS, particularly in cases where clinical data is insufficient or unavailable for training and, in general, will help address reproducibility issues and make MRS research more accessible to a wider audience.\\
+Word count (abstract): 295 -> 297 -> 282 words\\
+Word count (*paper): 4,206 -> 5,125 -> 6,314 words\\
+*Limited to intro, methods, results, and conclusions. Including auxiliary text (author info, etc.): 4,807 -> 5,757 -> 6,805 words
+% \cite{Li2015}
+} 
+
+\keywords{MRS, spectroscopy, in vivo, data simulation, synthetic data, open-source}
+
+
+\jnlcitation{\cname{%
+\author{LaMaster J.}, 
+\author{G. Oeltzschner}, and 
+\author{Y. Li}} (\cyear{2022}), 
+\ctitle{MRS-Sim: Open-Source Framework for Simulating Realistic In Vivo-like MR Spectroscopy Data}, \cjournal{NMR in Biomedicine}.}%, \cvol{2017;00:1--6}.}
+
+\maketitle
+
+\input{sections/sec:00:introduction.tex}
+\input{sections/sec:01:methods.tex}
+\input{sections/sec:02:results.tex}
+\input{sections/sec:02.5:discussion}
+\input{sections/sec:03:conclusions.tex}
+
+
+\input{sections/abbreviations}
+\glsaddall
+\section*{Abbreviations}
+\begin{multicols}{3}
+\printglossary[type=\acronymtype, nonumberlist]
+\end{multicols}
+
+\section*{Acknowledgments}
+The authors would like to thank Dr. Tobias Lasser for his mentorship during this work; Dr. Dhritiman Das for discussions about his experience with simulating MRS SVS data; the Harper House for their support while visiting UCSF to further develop the physics model; and the DAAD and Technical University of Munich's Graduate Center of Computation, Information and Technology for helping to finance the stay at UCSF in San Francisco, USA.
+
+\subsection*{Funding Information}
+This work was supported in part by a doctoral fellowship from the German Academic Exchange Service (DAAD) and the following grants from the National Institutes of Health: R00 AG062230, R01 CA262630, and R21 EB033516.
+
+\subsection*{Conflict of interest}
+The authors declare no potential conflict of interest.
+
+% \input{sections/supplement.tex}
+
+
+%\nocite{*}% Show all bib entries - both cited and uncited; comment this line to view only cited bib entries;
+\bibliography{mybibliography}
+
+% \clearpage
+% \input{tables/sup:metab_characterization}
+% \input{tables/sup:tab01}
+% \input{tables/tab:supp:condensed}
+
+% % \backmatter
+% \clearpage
+% \appendix
+% % \input{supplement}
+% % \include{sections/sec:supp:00:b0_field_simulator}
+% % \include{sections/sec:supp:02:metab_characterization}
+% % % \include{sections/sec:supp:01:baseline_and_res_water}
+% \include{supplement}
+
+\end{document}

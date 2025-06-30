@@ -1,0 +1,37 @@
+\begin{algorithm}[b!]
+\caption{Smoothed Bounded Pseudo-Random Walk} \label{alg:smoothed bounded pseudo-random walk}
+\begin{algorithmic}[1]
+\Require $start$: ppm start value, $end$: ppm end value, $std$: standard deviation of the random noise, $lower\_bound$: lower bound of the walk, $upper\_bound$: upper bound of the walk, $length$: length of the walk
+% \Ensure $rand\_walk$: bounded pseudo-random walk
+\end{algorithmic}
+
+\textbf{Function} SmoothedBoundedPseudoRandomWalk($start, end, std, lower\_bound, upper\_bound, length, window\_size$)
+% \Function{BoundedPseudoRandomWalk}{$start, end, std, lower\_bound, upper\_bound, length$}
+\begin{algorithmic}[1]
+\State $bounds = upper\_bound - lower\_bound$
+\Statex Generate raw random walk
+\State $rand = \text{generate\_random\_array}(size=length, std=std)$
+\State $rand = \text{cumsum}(rand, dim=-1)$
+
+\Statex Calculate the trend line
+\State $rand\_trend\_lines = \text{generate\_trend\_array}(start, end, length)$
+
+\Statex Calculate the difference between the random steps and the trend line
+\State $rand\_deltas = rand - rand\_trend\_lines$
+\Statex Normalize the delta array
+\State $delta\_range = bounds \div (rand\_deltas.max() - rand\_deltas.min())$
+\State $rand\_deltas = rand\_deltas * delta\_range$
+
+\Statex Adjust delta array if it exceeds \textit{bounds}
+\State $rand\_deltas = conditional\_adjustment(rand\_deltas)$
+\Statex Calculate the final random walk
+\State $random\_walk = trend\_lines + rand\_deltas$
+
+\Statex Smooth using a uniform smoothing kernel
+% \State $kernel\_size $
+\State $random\_walk = \text{average\_smoothing}(random\_walk, kernel\_size=window\_size * length)$
+
+\Statex \Return $random\_walk$ %trend\_lines + rand_deltas$
+% \EndFunction
+\end{algorithmic}
+\end{algorithm}

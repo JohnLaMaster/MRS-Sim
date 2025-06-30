@@ -9,7 +9,7 @@ import scipy.io as io
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from interpolate import CubicHermiteMAkima as CubicHermiteInterp
+from .interpolate import CubicHermiteMAkima as CubicHermiteInterp
 # from pm_v3 import PhysicsModel
 from torch.fft import fft, fftshift, ifft, ifftshift, irfft, rfft
 from types import SimpleNamespace
@@ -275,8 +275,8 @@ def prepareConfig(N: int, cfg: dict) -> dict:#, pt_density: int):
         'scale': torch.ones(N,1,1).uniform_(cfg['scale'][0],
                                             cfg['scale'][1]),
         'rand_omit': cfg['drop_prob'],
-        'start_prime': cfg['start_prime'] if 'start_prime' in cfg.keys() else torch.zero(1),
-        'end_prime': cfg['end_prime'] if 'end_prime' in cfg.keys() else torch.zero(1),
+        'start_prime': cfg['start_prime'] if 'start_prime' in cfg.keys() else torch.zeros(1),
+        'end_prime': cfg['end_prime'] if 'end_prime' in cfg.keys() else torch.zeros(1),
     }
 
 
@@ -342,7 +342,7 @@ def smooth(x: torch.Tensor,
     out = out[...,w_len//2:-w_len//2-1]
     assert(x.shape==out.shape)
     return out
-
+# 7, 9, 5 4 6 7 6 6 11 3
 
 def sample_baselines(N: int, **cfg): 
     if not isinstance(cfg, type(None)):
@@ -357,6 +357,9 @@ def sample_resWater(N: int, **cfg):
     if not isinstance(cfg, type(None)):
         try: cfg['pt_density']
         except: cfg['pt_density'] = 1204
+        if 'cropRange_water' in cfg.keys(): 
+            cfg['start'] = [0]
+            cfg['end'] = [0]
         dct = prepareConfig(N=N, cfg=cfg)#, pt_density=cfg['pt_density'])
         # start, _ = rand_omit(torch.zeros(N,1,1).uniform_(0,cfg['prime']), 
         #                      0.0, cfg['drop_prob'])

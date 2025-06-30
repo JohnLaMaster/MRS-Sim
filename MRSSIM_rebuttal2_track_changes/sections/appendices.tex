@@ -1,0 +1,72 @@
+
+
+
+\input{figures/fig:PM_stages_image.tex}
+
+\subsubsection{Basis Functions}
+MRI, and its derivatives, are spatially resolved imaging modalities. Even singular pixels in MRI images represent a 3D volume with a spatial distribution, as shown in Fig. \ref{fig:spatial voxel}. Addressing this spatial component is important when working with quantitative MR modalities like spectroscopy. Inaccurately simulated basis functions cause errors in metabolite quantification when fitting in vivo data. With simulated data, such basis functions negatively impact the realism of the simulations, limiting their usefulness, especially for validating quantitative methods.
+ 
+The importance of considering spatial localization led to Landheer \etal's MARSS\cite{Landheer2021} software package being selected for the default basis functions provided with this simulator. MARSS produces high-fidelity outputs by simulating 128 points in each direction. This very accurately captures the spatial nature of MR imaging. MARSS has a large number of common brain metabolites already defined in their template files. Vendor-specific basis functions for these metabolites can be simulated with PRESS and STEAM sequences. Custom basis functions can also be simulated with various metabolites, T1 and T2 relaxations, and specialized pulse sequences, e.g. editing sequences, (semi-)LASER, etc.
+ 
+\input{figures/fig:spatial_localization}
+ 
+\paragraph{Macromolecules and Lipids}
+Current spectral fitting methods for modeling MM and lipid signals are based on creating a group of curves that resemble clinical data but are not informed by any underlying physical phenomenon. Each fitting package contains their own set of basis functions for modeling these regions. Until this knowledge gap is filled and better simulation methods are developed, this work will use pre-generated basis functions from Osprey\cite{Oeltzschner2020} that were resampled to match the simulated basis functions from MARSS.
+ 
+\subsubsection{Amplitude Modulation}
+Metabolite quantities produced during spectral fitting are of an arbitrary scale. Comparing these quantities with a standard reference puts them into context. In vivo proton scans generally use an internal reference metabolite for relative quantification. Creatine is the default metabolite because its concentration is relatively stable. As a result, concentrations maps are generally reported as ratios with respect to creatine and all amplitude values in this model are defined \textit{wrt} creatine as the default. For this framework, physiological values were derived from work by Das \etal\cite{Das2017,Das2018}. These ranges were then expanded to include values observed in in vivo scans from a private glioma dataset. In keeping in line with the LCModel, the expected concentrations ranges represent the scaling factors needed for spectral fitting instead of the ratios of peak integrals or peak heights.
+ 
+\subsubsection{Lineshape Profiles}
+In spectral fitting, the Voigt lineshape profile is the most commonly used as it most closely matches clinical data. It is a combination of a Lorentzian and a Gaussian and is used in various fitting packages, such as LCModel\cite{Provencher2001}, TARQUIN\cite{Wilson2011}, jMRUI\cite{Stefan2009}, and Osprey\cite{Oeltzschner2020}. Each peak is characterized by an individual Lorentzian value while a single Gaussian value is applied to the metabolites, while a second value can be applied to the macromolecules and lipids. Standard practice from the aforementioned software packages assigns a single Lorentzian value to each metabolite, instead of each moiety. However, experimental results from Wyss \etal\cite{Wyss2018} can be selected which characterized T2 relaxation values at the moiety-level for various brain metabolites at 3T in three different regions in the brain. As more metabolites are characterized, new information can be added to the model. For completeness, it is also possible to specify either a purely Lorentzian or a purely Gaussian lineshape.
+ 
+\subsubsection{$B_0$ Inhomogeneities}
+Lower and higher order shimming procedures homogenize the magnetic field in the target volume to different degrees. However, certain regions of the brain, such as the prefrontal cortex or deep brain structures like the thalamus or basal ganglia, are more difficult to shim and therefore suffer from large magnetic susceptibility effects, resulting in significant lineshape distortions. Fig. \ref{fig:spatial B0} shows the normal, subtle $B_0$ changes across the volume of a spectroscopy voxel while Fig. \ref{fig:spatial B0 severe} illustrates these high susceptibility effects. In such cases, spectra from these regions exhibit significant lineshape distortions which cannot be adequately characterized using idealized lineshape profiles. Fig. \ref{fig:B0 effects} shows the result of high susceptibility effects on lineshapes.
+
+\input{figures/fig:b0_peaks}
+
+Small $B_0$ inhomoegeneities are, in general, sufficiently modeled by the Gaussian term of the Voigt lineshape. However, to simulate more severe distortions, a $B_0$ field volume needs to be modeled and applied to the basis functions. In general, this approach mirrors Li \etal\cite{Li2015}, but the $B_0$ field map is simulated rather than acquired. As with MARSS, Li \etal\ suggests using multiple points in each direction instead of a single value per voxel. The exact number of points used in each direction is described by the size of the spectroscopy voxel divided by the size of an anatomical imaging voxel. The default values assume sizes of 10cm$^3$ and 0.5cm$^3$ respectively, which results in $20^3$ simulation points. However, any cuboidal shape, rectangular or otherwise, can be modeled. The $B_0$ field is defined by four variables, all of which are mean offsets: $\pm dx$, $\pm dy$, $\pm dz$, and $\mu$. $dx, dy,$ and $dz$ describe half of the change in $B_0$ in their respective direction from the voxel's center and $\mu$ is the mean of the entire voxel. 
+ 
+\subsubsection{Baseline and Residual Water}
+
+\input{figures/fig:random_walk_images.tex}
+
+Currently, the underlying physical phenomena that induce spectral baseline offsets are poorly understood. In fact, there is no physics-based model for simulating these offsets. Similarly, the residual water region is also poorly characterized. Therefore, a naive random model can be used in conjunction with clinically observed constraints to approximate what is observed in vivo. This work proposes a smoothed, pseudo-random, bounded walk generator for both the broad spectral baseline and the more irregular residual water region. The approach is elaborated on in Algorithm \ref{alg:smoothed bounded pseudo-random walk}. Customizable profiles were developed for each artifact to more closely approximate what is expected in vivo. Immense variety of outputs can be achieved by randomly sampling the parameters from distributions instead of fixing them to set values. Once simulated, they are resampled to match the ppm range of acquired data and the order of magnitude is matched to the spectra. The Hilbert transform is then used to generate the corresponding complex component before being added to the FID. As shown in Fig. \ref{fig:random walk generator}, this generator produces very different outputs depending on the specified configurations. Fig. \ref{fig:baseline_region} shows very broad, smooth lines while Fig. \ref{fig:reswater_region} shows highly irregular lines that closely resemble residual water regions. All outputs are then scaled to modulate the impact on the final spectra. A more detailed exploration of this algorithm and the effects of each parameter are presented in the supplement for baseline and residual water simulations.
+
+\input{algorithms/alg:bounded_random_walk}
+ 
+\subsubsection{Noise}
+The noise in this model assumes a Gaussian distribution. The input SNR is first converted from decibels to a linear SNR. Then the standard deviation for this distribution is calculated using the maximum height of a metabolite of choice in the real spectrum and the desired SNR. The real and imaginary components of the noise can be correlated using the Hilbert transform. If they are assumed to be uncorrelated, then separate noise vectors are sampled for each component. 
+
+\subsubsection{Phase Offsets}
+\paragraph{Zero-Order Phase}
+FIDs and spectra are complex data types which consist of a real and imaginary component. A $0^{\circ}$ zero-order phase offset results in absorption and dispersion spectra in these components, respectively. An absorption spectrum exhibits peaks with idealized lineshapes that are purely positive or purely negative, while dispersion spectra exhibit peaks that are both positive and negative. As shown in Fig. \ref{fig:phase effects}, non-zero degree offsets result in a mixture of absorption and dispersion spectra. In absorption mode, spectral peaks directly reflect the number of hydrogens of that species and the concentration of that molecule. This relationship means that the phase has a direct impact on metabolite quantification. 
+ 
+\paragraph{First-Order Phase}
+First-order phase, i.e. linear phase, is a frequency-dependent offset that emanates from a reference point, i.e. the center frequency which is typically the water peak at 4.65ppm but can be modified when necessary. It carries the unit degrees per ppm. A linear phase offset creates asymmetrical line shapes that grow larger as one moves away from the reference point.
+
+\input{figures/fig:phase}
+ 
+\subsubsection{Frequency Shifts}
+Frequency shifts observed in a spectrum result from complex interactions with a variety of factors. During the acquisition, the FID experiences a global frequency shift. However, individual moieties from metabolites and nuisance signals from macromolecules, lipids, and fats such as diglycerides and triglycerides, can experience individual frequency shifts which are attributed to temperature and pH effects.
+
+The current implementation allows each metabolite, or moeity depending on the simulation, to have a minor, independent frequency shift in addition to the global shift which is in line with common spectral fitting protocols. For more clinically realistic spectra, values can be used from the work by Wermter \etal\cite{Wermter2017} which characterized the temperature-induced frequency shift of brain metabolite moieties with temperature sensitivity. As more metabolites are characterized for their temperature- and pH-sensitivities, this information can be added to simulate more realistic spectra.
+ 
+\subsubsection{Eddy Currents}
+Eddy currents are common artifacts in MRI acquisitions that are induced by changes in the magnetic field, typically caused by the imaging gradients and present as time-dependent resonant frequency shifts. Correction techniques, such as the Klose\cite{Klose1990}, tend to be non-parameterized, making it difficult to model the exact effect of each approach. Near \etal\ in FID-A\cite{Simpson2017}, however, provide a parameterized equation for simulating first-order eddy currents. These artifacts are applied as a function of amplitude, $A$, time constant, $tc$, and time, $t$. The time constant must be short enough that it occurs entirely within the recorded echo, otherwise it will appear as a simple, global frequency shift. The effects of eddy currents can be seen in Fig. \ref{fig:eddy currents}.
+
+\input{figures/fig:eddy_currents}
+
+\subsubsection{Multi-Coil Transients}
+A transient copy is made for each coil in the simulated scenario. These transients will experience additional artifacts including zero-order phase and frequency drifts, scaling due to coil sensitivity, and decreased SNR values. To allow for maximum variation in the simulations, each parameter can be sampled from distributions and is discussed below.
+
+\paragraph{Noise} Multi-coil acquisitions lead to an SNR improvement of the final spectrum by a factor of the square root of the number of non-zero weighted transients. To vary the SNR among the transients, this model scales the target linear SNR according to the number of coils and then samples scaling factors from a narrow normal distribution to maintain the mean target SNR. 
+
+\paragraph{Frequency Drift and Phase Drift}
+Frequency drifts and phase drifts are phenomena observed in multi-coil acquisitions in which each coil transient has an independent offset. The lower SNR values of the transients make it harder to accurately correct these inter-transient variations. Therefore, drifts are typically minimized between the transients, called alignment. Proper alignment will preserve the underlying spectral features once the transients are combined. These offsets and alignments are shown in Fig. \ref{fig:simulated transients}.
+
+\input{figures/fig:transient_samples}
+ 
+\paragraph{Coil Sensitivity}
+A variety of coil combination techniques can be used to successfully combine multi-coil spectra. While these techniques differ in how they calculate the weights, all of them use weights to scale the transients before averaging. Assigning context, such as water peak height or coil sensitivity maps, to these weights when planning the simulations can help define the necessary parameter ranges and distributions to be in line with a given clinical protocol.
+ 
+\subsubsection{Final Steps} The desired use case will determine if a FID or a spectrum is necessary. If a FID is required, the simulation is finished and the data will be exported. If a spectrum is required, the Fourier transform will recover the spectrum at which point it can be cropped and resampled to a desired ppm range and spectral length. The default interpolation technique in this framework is a cubic Hermite modified Akima interpolator with momentum.

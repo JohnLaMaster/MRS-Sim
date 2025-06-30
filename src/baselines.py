@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from aux import batch_linspace
+from .aux import batch_linspace
 
 __all__ = ['bounded_random_walk']
 

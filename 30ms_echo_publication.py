@@ -21,6 +21,7 @@ def sample(inputs):
     params = torch.ones((totalEntries, ind['overall'][-1]+1)).uniform_(0,1)
     params, _ = normalize(params, noisy=-1, denom=None) 
     # normalization converts the range from [0,1) to [0,1].
+    baselines, res_water = None, None
     
     for i in ind['metabolites']:
         params[:,i].fill_(1.0)
@@ -157,9 +158,11 @@ def sample(inputs):
       factors = torch.distributions.normal.Normal(1,0.25).sample(params[:,ind['coil_phi0']].shape)
       params[:,ind['coil_phi0']] = factors * params[:,ind['coil_phi0']][0]
 
+    # This is for the plots in the methods section
     if config.samples=="B0":
         # Create pairs of samples with the same parameters - B0 inhomogeneities examples
-        for i, b0, db in zip([0,1,2],[1e-8,75,175],[2.5,5,10]):
+#         for i, b0, db in zip([0,1,2],[1e-8,75,175],[2.5,5,10]):
+        for i, b0, db in zip([0,1,2,3,4,5,6,7,8,9],[1e-8,5,10,15,20,25,7.5,7.5,7.5,7.5],[1.,1.,1.,1.,1.,1.,0.5,2.5,5.0,10.0]):
             params[i,:] = params[0,:].clone()
             params[i,:] = b0
             for n in ind['b0_dir']: params[i,n].fill_(db)
@@ -171,16 +174,45 @@ def sample(inputs):
                 
             for n in ind['g']:
                 params[i,n].fill_(0.0)
-
-    if config.samples=="EC":
-        # Create pairs of samples with the same parameters - B0 inhomogeneities examples
-        for i in range(1,6): params[i,:] = params[0,:].clone()
-        for i in [1,3,5]:
-            # params[i,:] = params[int(i-1),:].clone()
-            for ii, n in enumerate(ind['ecc']): 
-                if ii==1: 
-                    params[int(i-1),n].fill_(0.001)
-                    params[i,ii].fill_(i)
+            for n in ind['f_shift']:
+                params[i,n].fill_(0.0)
+                
+#     # This is for the B0 plots in the results section
+#     if config.samples=="B0": 
+#         # Create pairs of samples with the same parameters - B0 inhomogeneities examples
+#         I = [i for i in range(15)]
+#         # B0_mu = [i for i in torch.linspace(-225,270,15).round()]
+#         
+# #         B0_mu = [i for i in torch.linspace(0,270,15).round()]
+#         B0_mu = [-60]
+#         for i in torch.linspace(-30,30,13).round(): B0_mu.append(i) 
+#         B0_mu.append(60)
+#         DB_mu = [i for i in torch.distributions.uniform.Uniform(1,5).sample([15])]
+#         DB_mu[0] = 1e-3
+#         for i, b0, db in zip(I, B0_mu, DB_mu):
+#             params[i,:] = params[0,:].clone()
+#             params[i,:] = b0
+#             for n in ind['b0_dir']: params[i,n].fill_(db)
+# 
+#             # if config.b0:
+#             #     params[i,ind['b0']].fill_(0.0)
+#            #     for n in ind['b0_dir']: params[i,n].fill_(1**10-6)
+#             # else:
+#                 
+#             for n in ind['g']:
+#                 params[i,n].fill_(0.0)
+#             for n in ind['f_shift']:
+#                 params[i,n].fill_(0.0)
+# 
+#     if config.samples=="EC":
+#         # Create pairs of samples with the same parameters - B0 inhomogeneities examples
+#         for i in range(1,6): params[i,:] = params[0,:].clone()
+#         for i in [1,3,5]:
+#             # params[i,:] = params[int(i-1),:].clone()
+#             for ii, n in enumerate(ind['ecc']): 
+#                 if ii==1: 
+#                     params[int(i-1),n].fill_(0.001)
+#                     params[i,ii].fill_(i)
     
     if config.samples=="PHI":
         # # Comparing phased, zero-, and first-order phase
