@@ -76,7 +76,10 @@ Simulation software only works with numerical values. While not the main focus o
 If you use one of the provided configuration templates, please cite the paper below (citation will appear once published). If you would like to collaborate to create a dataset, please reach out at john.t.lamaster (at) gmail dot com.
 
 # Citation
-The appropriate citation will be provided once the manuscript has been accepted.
+If you use any part of this codebase, please cite the following publication:
+
+> LaMaster, J., Oeltzschner, G., & Li, Y. (2025). MRS‐SIM: Open‐Source Framework for Simulating in Vivo‐Like Magnetic Resonance Spectra. *NMR in Biomedicine, 38*(10), e70130. https://doi.org/10.1002/nbm.70130
+
 <!--
 The following is a brief overview:
 
