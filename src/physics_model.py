@@ -1462,6 +1462,11 @@ class PhysicsModel(nn.Module):
             #                               b0=params[:,self.index['b0']],
             #                               param=params[:,self.index['b0_dir']])
             
+            
+        # Record metabolite-level power SNR
+        pSNR = fid[...,0].unsqueeze(-1)
+        sSNR = Fourier_Transform(fid).max(dim=-1, keepdims=True)[...,0,:].unsqueeze(-2)
+            
         # Filter the basis functions for the ground truth 
         if snr_filter:
             filter_peak_heights = fid[...,0,:].abs().amax(dim=-1).unsqueeze(-2)
@@ -1483,7 +1488,7 @@ class PhysicsModel(nn.Module):
         
         # SNR filtering
         if noise:
-            if gen: print('>>>>> Adding noise')
+            if gen: print('>>>>> Calculatinging noise')
             noise_vec, d = self.generate_noise(fid=fidSum, 
                                            max_val=mx_values, 
                                            param=params[:,self.index['snr']], 
@@ -1499,6 +1504,17 @@ class PhysicsModel(nn.Module):
                 spectral_fit = fidSum.clone()
                 # fidSum.shape = [bS, (syn / filtered), 2, spec_length]
             
+            
+        # Calculating the power and spectral metabolite-level SNRs
+        # fid.shape [bS, 2, spec_length] and noise.shape [bS, ..., transients, channels, length]
+        # Power SNR
+        for _ in range(noise_vec.ndim - pSNR.ndim): 
+            pSNR = pSNR.unsqueeze(-3)
+        pSNR /= noise_vec.std(dim=-1, keepdims=True)
+        # Spectral SNR
+        for _ in range(noise_vec.ndim - sSNR.ndim): 
+            sSNR = sSNR.unsqueeze(-3)
+        sSNR /= noise_vec.std(dim=-1, keepdims=True)
 
         # Add the Residual Water and Baselines
         if offsets:
@@ -1673,7 +1689,8 @@ class PhysicsModel(nn.Module):
         print('>>>>> Compiling spectra')
         return self.compile_outputs(specSummed, spectral_fit, offsets, params, 
                                     denom, self.quantify_metab(fid, params, 
-                                                               self.wrt_metab)
+                                                               self.wrt_metab),
+                                    SNR={'power': pSNR, 'spectral': sSNR}
                                     )
 
     def compile_outputs(self, 
@@ -1683,6 +1700,7 @@ class PhysicsModel(nn.Module):
                         params: torch.Tensor, 
                         denom: torch.Tensor,
                         quantities: dict,
+                        SNR: dict=None,
                        ) -> torch.Tensor:
         if offsets:
             if not isinstance(offsets['baselines'], type(None)):
@@ -1699,6 +1717,10 @@ class PhysicsModel(nn.Module):
         try: residual_water = offsets['residual_water']
         except Exception: residual_water = None
         quantities = torch2numpy(quantities)
+        
+        if not isinstance(SNR, type(None)):
+            for k, v in SNR.items():
+                SNR[k] = v.numpy()
 
         return specSummed.numpy(), spectral_fit.numpy(), baselines, \
-               residual_water, params.numpy(), quantities
+               residual_water, params.numpy(), quantities, SNR['power'], SNR['spectral']

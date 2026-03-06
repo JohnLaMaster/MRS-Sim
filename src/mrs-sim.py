@@ -219,7 +219,7 @@ def simulate(config_file, args=None):
         print(type(ppm), ppm.min(), ppm.max())
 
         if first:
-            spectra, fit, baseline, reswater, parameters, quantities = outputs
+            spectra, fit, baseline, reswater, parameters, quantities, snr = outputs
             first = False
         else:
             spectra = np.concatenate([spectra, outputs[0]], axis=0)
@@ -228,6 +228,7 @@ def simulate(config_file, args=None):
             reswater = np.concatenate([reswater, outputs[3]], axis=0) if reswater else None
             parameters = np.concatenate([parameters, outputs[4]], axis=0)
             quantities = concat_dict(quantities, outputs[5])
+            snr = concat_dict(snr, outputs[6])
         if config.totalEntries>threshold and (i+step) % threshold==0:
             _save(path=path + '_{}'.format(counter), 
                   spectra=spectra, 
@@ -236,6 +237,7 @@ def simulate(config_file, args=None):
                   reswater=reswater, 
                   parameters=sort_parameters(parameters, ind), 
                   quantities=quantities, 
+                  snr=snr,
                   cropRange=config.cropRange, 
                   ppm=pm.get_ppm(cropped=True).numpy())
             first = True
@@ -249,11 +251,12 @@ def simulate(config_file, args=None):
                   reswater=reswater, 
                   parameters=sort_parameters(parameters, ind), 
                   quantities=quantities, 
+                  snr=snr,
                   cropRange=config.cropRange, 
                   ppm=pm.get_ppm(cropped=True).numpy())
 
 
-def _save(path, spectra, fits, baselines, reswater, parameters, quantities, cropRange, ppm):
+def _save(path, spectra, fits, baselines, reswater, parameters, quantities, snr, cropRange, ppm):
     print('>>> Saving Spectra')
     base, _ = os.path.split(path)
     os.makedirs(base, exist_ok=True)
@@ -264,6 +267,7 @@ def _save(path, spectra, fits, baselines, reswater, parameters, quantities, crop
              'residual_water': reswater if isinstance(reswater, type(None)) else [],
              'params': parameters,
              'quantities': quantities,
+             'mSNR': snr,
              'cropRange': cropRange,
              'ppm': ppm,
             }
