@@ -80,6 +80,7 @@ def _save(path: str,
           reswater: np.ndarray, 
           parameters: np.ndarray, 
           quantities: dict, 
+          snr: dict,
           cropRange: list, 
           ppm: np.ndarray,
           header: dict):
@@ -93,6 +94,7 @@ def _save(path: str,
              'residual_water': reswater if not isinstance(reswater, type(None)) else [],
              'params': parameters,
              'quantities': quantities,
+             'SNR': snr,
              'cropRange': cropRange,
              'ppm': ppm,
              'header': header
@@ -145,7 +147,7 @@ def simulate(inputs, args=None):
         ppm = pm.ppm.numpy()
 
         if first:
-            spectra, fit, baseline, reswater, parameters, quantities = outputs
+            spectra, fit, baseline, reswater, parameters, quantities, snr = outputs
             first = False
         else:
             spectra = np.concatenate([spectra, outputs[0]], axis=0)
@@ -154,6 +156,7 @@ def simulate(inputs, args=None):
             reswater = np.concatenate([reswater, outputs[3]], axis=0) if reswater else None
             parameters = np.concatenate([parameters, outputs[4]], axis=0)
             quantities = concat_dict(quantities, outputs[5])
+            snr = concat_dict(snr, outputs[6])
         if config.totalEntries>threshold and (i+step) % threshold==0:
             new_path = _save(path=path + '_{}'.format(counter), 
                              spectra=spectra, 
@@ -162,6 +165,7 @@ def simulate(inputs, args=None):
                              reswater=reswater, 
                              parameters=sort_parameters(parameters, ind), 
                              quantities=quantities, 
+                             snr=snr, 
                              cropRange=pm.cropRange, 
                              ppm=ppm,
                              header=config.header)
@@ -178,6 +182,7 @@ def simulate(inputs, args=None):
                              reswater=reswater, 
                              parameters=sort_parameters(parameters, ind), 
                              quantities=quantities, 
+                             snr=snr, 
                              cropRange=pm.cropRange, 
                              ppm=ppm,
                              header=config.header)
