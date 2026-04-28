@@ -11,16 +11,8 @@
 
 # MRS-Sim: Open-Source Framework for Simulating Realistic, In Vivo-like Clinical Magnetic Resonance Spectra
 
-**Under review: Expected publication in _Spring 2024_.**
-
-***Note:** The current version is the pre-release. The first full release will come soon. If you happen to find any bugs, please open an issue to let me know.
-
 _Abstract:_ 
-> This work introduces MRS-Sim, an open-source, publicly available in vivo-like data simulator for generating synthetic magnetic resonance spectroscopy data. Current literature shows inconsistencies and varying parameters in simulating data, making it difficult to generalize and reproduce results. MRS-Sim is a powerful tool for modeling the complexities of MRS data for various clinical scenarios. It uses high fidelity basis functions to simulate sequence- and vendor-specific acquisitions. The underlying physics model includes all spectral components commonly found in standard spectral fitting routines and some novel components. The first is a 3D _B<sub>0</sub>_ field map simulator to model _B<sub>0</sub>_ field inhomogeneities, ranging from slight variations to severe distortions. The second is a novel semi-parametric simulator that generates poorly characterized residual water region signal and baseline offset contributions. This framework can simulate everything between raw multi-coil transients and preprocessed coil-combined data. 
-> 
-> A repository of information has been compiled to help non-expert users with general simulation of MRS data. When simulating clinical-like datasets, it is important to be able to study the underlying ranges and statistical distributions of the simulation parameters of the clinical data. Therefore, accompanying software can analyze the distributions and ranges of parameters in fitted datasets, allowing simulations to be tailored to specific clinical data.
-> 
-> The modularity of this framework allows for easy customization of simulations to suit a variety of clinical scenarios and encourages continued community development. By simulating in vivo-like data, this framework can aid in many tasks in MRS, including verifying spectral fitting protocols and reproducibility analyses. The availability of readily available, synthetic data will also assist deep learning research for MRS, particularly in cases where clinical data is insufficient or unavailable for training. Providing easy access to high-quality synthetic data will help address reproducibility issues and make MRS research more accessible to a wider audience.
+> Realistic, in vivo-like synthetic data is increasingly needed to develop and validate methods in magnetic resonance spectroscopy. MRS-Sim is a powerful, open-source framework for simulating such data while providing known ground truth values. Its modularity enables modeling the complexities of MRS data for various in vivo scenarios. The underlying physical equations include both commonly used spectral components of linear-combination fitting routines and two novel components. The first is a 3D _B<sub>0</sub>_ field map simulator that models _B<sub>0</sub>_ field inhomogeneities, ranging from slight variations to severe distortions. The second is a novel semi-parametric generator that mimics signals from poorly characterized residual water regions and spectral baseline contributions. This framework can simulate scenarios ranging from raw multi-coil transients to preprocessed, coil-combined multiaverage data. Simulating realistic in vivo-like datasets requires appropriate model parameter ranges and distributions, best determined by analyzing the fitting parameters from existing in vivo data. Therefore, MRS-Sim includes tools for analyzing the ranges and statistical distributions of those parameters from in vivo datasets fitted with Osprey, allowing simulations to be tailored to specific datasets. Additionally, the accompanying repository of supplemental information assists nonexpert users with general simulations of MRS data. The modularity of this framework facilitates easy customization in various in vivo scenarios and promotes continued community development. Using a single framework for diverse applications addresses the inconsistencies in current protocols. By simulating in vivo-like data, MRS-Sim supports many MRS tasks, including verifying spectral fitting protocols and conducting reproducibility analyses. Readily available synthetic data also benefits deep learning research, particularly when sufficient in vivo data is unavailable for training. Overall, MRS-Sim will promote reproducibility and make MRS research more accessible to a wider audience.
 
 # Model Overview
 <img src="https://github.com/JohnLaMaster/MRS-Sim/assets/7785925/9b835e36-039a-49d1-aa91-da2adb28071e" width="1000">
@@ -66,6 +58,8 @@ The code and output files used to generate the samples for the manuscript are cu
 ## Code Base & New Clinical Scenarios
 Would you like to add additional functionality to this software? Are you working with types of spectra that are not currently included? Please feel free to make a pull request. Currently, MRS-Sim simulates collections of single voxel spectra. New additions could start with adding paired samples, i.e. a water reference (with eddy current) and a corresponding water suppressed signal or EDIT-ON/EDIT-OFF pairs for J-difference edited spectra. Eventually 2D and other MRS modalities can be developed too. If you already have code that you would like to share, please reach out and we'll see about incorporating it. If you are writing code for this work, please make sure it is VERY well documented so we know how it fits into the repo and what the expected inputs and outputs are.
 
+***Note:** If you happen to find any bugs, please open an issue to let me know. If you have an feature requests, you can open an issue or a pull request.
+
 ## Fitting Parameters Dataset Collection
 An Open Science Framework project is being put together. The goal of this data repository is to collect the fitting parameters from a variety of clinical scenarios in order to develop a unified prior distribution that will be used to sample model parameters for MRS-Sim. The end goal would be a more automated way to simulate physiologcal or pathology-specific datasets.
 
@@ -76,7 +70,10 @@ Simulation software only works with numerical values. While not the main focus o
 If you use one of the provided configuration templates, please cite the paper below (citation will appear once published). If you would like to collaborate to create a dataset, please reach out at john.t.lamaster (at) gmail dot com.
 
 # Citation
-The appropriate citation will be provided once the manuscript has been accepted.
+If you use any part of this codebase, please cite the following publication:
+
+> LaMaster, J., Oeltzschner, G., & Li, Y. (2025). MRS‐SIM: Open‐Source Framework for Simulating in Vivo‐Like Magnetic Resonance Spectra. *NMR in Biomedicine, 38*(10), e70130. https://doi.org/10.1002/nbm.70130
+
 <!--
 The following is a brief overview:
 
