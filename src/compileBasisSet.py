@@ -11,24 +11,13 @@ import matplotlib.pyplot as plt
 
 
 def main(args: str):
-    # with open(cfg_path, 'r') as file:
-    #     config = json.load(file)
-    
     # Load template file
-    # template_data = io.loadmat(args.template, struct_as_record=False)
     template_data = loadmat_as_dict(args.template)
-    # metabolites = copy.deepcopy(template_data['metabolites'])
-    # header = copy.deepcopy(template_data['header'])
     metabolites = template_data['metabolites']
     header = template_data['header']
-    # artifacts = template_data['artifacts']
     del template_data
     
-    # with open(args.marssinput, 'r') as file:
-    #     config = json.load(file)
-    # config = io.loadmat(args.marssinput)
     config = loadmat_as_dict(args.marssinput)
-    # print(config['B0'], config['bw'], config['bw'], config['Npoints'])
     header['B0'] = config['B0']
     header['spectralwidth'] = config['bw']
     header['Ns'] = config['Npoints']
@@ -36,56 +25,34 @@ def main(args: str):
         header['centerFreq'] = config['referencePeak']
     except KeyError:
         header['centerFreq'] = 4.65
-    # a = 1e3
-    # b = np.sum(config['delays'])
-    # c = np.sum(config['durations'])
-    # d = 0.5*config['durations'][0][0]
-    # print(b.shape, c.shape, d.shape)
-    # print(a,b,c,d)
-    # print(type(header))
-    # print(header)
-    header['TE'] = 1e3*(np.sum(config['delays']) + np.sum(config['durations']) - 0.5*config['durations'])#[0][0])
-    # header['pulseSequence'] = args.pulse_sequence
+
+    header['TE'] = int(np.round(1e3*(np.sum(config['delays']) + np.sum(config['durations']) - 0.5*config['durations'][0])))
     header.update(pulseSequence=args.pulse_sequence)
     header['vendor'] = args.vendor
-
 
     # Loop over files in the new_path directory
     for i, filename in enumerate(os.listdir(args.spin_path)):
         if filename.endswith('.mat'):
             filepath = os.path.join(args.spin_path, filename)
-            exptDat = loadmat_as_dict(filepath)['exptDat']#[0][0]
+            exptDat = loadmat_as_dict(filepath)['exptDat']
             if i == 0:
-                # print(exptDat['sw_h'])
                 sw = exptDat['sw_h']
                 dt = 1 / exptDat['sw_h']
-                # header['spectralwidth'] = sw
                 header['carrier_frequency'] = exptDat['sf']
-                # header['Ns'] = exptDat['nspecC']
                 header['t'] = np.arange(0, dt * header['Ns'], dt)
-                # header['centerFreq'] = config['centerFreq']
-                # header['B0'] = config['B0']
-                # header['TE'] = te
-                # header['pulse_sequence'] = seq
-                # header['vendor'] = vendor
-                # header['ppm'] = (-0.5 * sw + np.arange(0, header['Ns']) * \
-                #                     sw / (header['Ns'] - 1)) + config['centerFreq']
                 header['ppm'] = np.expand_dims(np.linspace(
                     start=(-0.5 * sw) / exptDat['sf'], 
                     stop=(0.5 * sw) / exptDat['sf'], 
                     num=int(header['Ns'])
                 ) + header['centerFreq'], axis=0)
-                print('start={}, stop={}, num={}'.format((-0.5 * sw) / exptDat['sf'], (0.5 * sw) / exptDat['sf'], int(header['Ns'])))
             else:
                 assert sw == exptDat['sw_h']
                 assert header['carrier_frequency'] == exptDat['sf']
                 assert header['Ns'] == exptDat['nspecC']
             
-            # print(os.path.split(filepath))
+
             _, metab = os.path.split(filepath)
             metab, _ = os.path.splitext(metab)
-            # print(metab)
-            # _, metab, _ = os.path.split(filepath)
             metab = metab.lower()
             try:
                 metabolites[metab]['fid'] = np.expand_dims(np.stack(
@@ -103,15 +70,6 @@ def main(args: str):
                 'min':0.0,
                 'max':1.0}
                 )
-            # if not ("mm" in metab.lower()):
-            #     exptDat['fid'] = np.flip(exptDat['fid'], axis=-1)
-            #     metabolites[metab]['fid'] = np.stack([np.squeeze(exptDat['fid'].real), 
-            #                             np.squeeze(exptDat['fid'].imag)], 
-            #                             axis=0)
-            # else;
-            #     metabolites[metab]['fid'] = np.stack([np.squeeze(exptDat['fid'].real), 
-            #                             np.squeeze(exptDat['fid'].imag)], 
-            #                             axis=0)
 
     # # Store edited spectra if needed
     # if config['edit_off_path']:
@@ -124,6 +82,8 @@ def main(args: str):
     #                                                   np.squeeze(exptDat['fid'].imag)], 
     #                                                  axis=0)
 
+    # Visually inspect the basis functions to ensure they appear correctly
+    # at least in terms of chemical shift and directionality
     visual_inspection(metabolites, header['ppm'])
 
     # Load configuration parameters
@@ -228,28 +188,38 @@ def loadmat_as_dict(filename):
 
 
 if __name__=='__main__':
+    # *NOTE*: Needs to be run from the MRS-Sim directory
     parser = argparse.ArgumentParser()
-    # parser.add_argument('config_file', '--cfg', metavar='cfg', type=str, default='./src/configurations/debug_new_init.json')#DL_PRESS_144_ge.json')
     parser.add_argument('--spin_path', type=str, default='~/Documents/Repositories/MARSSCompiled/VERI_GE_PRESS_30ms/SummedSpins_for_MARSSinput')
     parser.add_argument('--marssinput', type=str, default='~/Documents/Repositories/MARSSCompiled/MARSSInput.mat')
     parser.add_argument('--template', type=str, default='~/Documents/Repositories/MRS-Sim/src/basis_sets/template.mat')
-    parser.add_argument('--save_name', type=str, default=None)#DL_PRESS_144_ge.json')
-    parser.add_argument('--save_name_prefix', type=str, default=None)#DL_PRESS_144_ge.json')
-    parser.add_argument('--save_name_suffix', type=str, default=None)#DL_PRESS_144_ge.json')
+    parser.add_argument('--save_name', type=str, default=None)
+    parser.add_argument('--save_name_prefix', type=str, default=None)
+    parser.add_argument('--save_name_suffix', type=str, default=None)
     parser.add_argument('--pulse_sequence', type=str, default='unspecified_sequence')
     parser.add_argument('--vendor', type=str, default='unspecified_vendor')
 
     args = parser.parse_args()
 
-    # Confirm the config file exists and is a json file
-    # assert os.isfile(args.config_file)
-    # assert os.path.splitext(args.config_file)[1] in ['.json']
-    # assert os.isdir(args.spin_path)
-    # assert os.isfile(args.marssinput)
-    # assert os.path.splitext(args.marssinput) in ['.mat']
-    # assert os.isfile(args.tempalte)
+    # Run checks on the input arguments
+    # Expand ~ to full path
+    spin_path = os.path.expanduser(args.spin_path)
+    marssinput = os.path.expanduser(args.marssinput)
+    template = os.path.expanduser(args.template)
+
+    # --- spin_path: must be a directory ---
+    assert os.path.isdir(spin_path), f"spin_path is not a valid directory: {spin_path}"
+
+    # --- marssinput: must be .mat file ---
+    assert os.path.isfile(marssinput), f"marssinput file not found: {marssinput}"
+    assert os.path.splitext(marssinput)[1].lower() == '.mat', \
+        f"marssinput must be a .mat file: {marssinput}"
+
+    # --- template: must be .mat file ---
+    assert os.path.isfile(template), f"template file not found: {template}"
+    assert os.path.splitext(template)[1].lower() == '.mat', \
+        f"template must be a .mat file: {template}"
     
-    # main(args.config_file)
     main(args)
 
 '''
