@@ -6,7 +6,7 @@ from collections import OrderedDict
 
 import numpy as np
 from scipy.io import savemat as io_savemat
-from .aux import sample_baselines, sample_resWater, sort_parameters
+from .aux import sample_baselines, sample_resWater, sort_parameters, concat_dict
 # from NIfTIMRS import Mat2NIfTI_MRS
 from .physics_model import PhysicsModel
 from types import SimpleNamespace
@@ -169,8 +169,8 @@ def simulate(inputs, args=None):
                              cropRange=pm.cropRange, 
                              ppm=ppm,
                              header=config.header)
-            if config.NIfTIMRS:
-                save2nifti.forward(datapath=new_path)
+            # if config.NIfTIMRS:
+            #     save2nifti.forward(datapath=new_path)
             first = True
             counter += 1
             print('>>> ** {} ** <<<'.format(counter))
@@ -186,7 +186,7 @@ def simulate(inputs, args=None):
                              cropRange=pm.cropRange, 
                              ppm=ppm,
                              header=config.header)
-            if config.NIfTIMRS:
-                save2nifti.forward(datapath=new_path)
+            # if config.NIfTIMRS:
+            #     save2nifti.forward(datapath=new_path)
         del spectra, fit, baseline, reswater, parameters, quantities
     return path
