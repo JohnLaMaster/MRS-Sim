@@ -203,12 +203,8 @@ def main():
     rw_real   = to_complex(np.asarray(mat["residual_water"]))[idx,:].real
     
     spec_real = np.fft.fftshift(np.fft.fft(spec),axes=-1).real[0,:]
-    print('spec.shape (FID): ',spec.shape)
-    print('spec.amax (FID): ',np.amax(spec))
-    print('spec_real.amax: ',np.amax(spec_real))
     denom = np.amax(spec_real)
     spec_real = spec_real / denom
-    print('spec_real.amax: ',np.amax(spec_real))
     bl_real   = bl_real / denom
     rw_real   = rw_real / denom
 
@@ -216,14 +212,10 @@ def main():
     # Stack them in MET_KEYS order to get a [N_met] vector for this index.
     if loader == "scipy":
         p = mat["params"]
-        # try:
         a_vec = np.array([np.atleast_1d(getattr(p, key)).squeeze()[idx]
                         for key in MET_KEYS])
         d_vec = np.asarray(p.d)[idx]
         g_vec = np.asarray(p.g)[idx]
-        # except AttributeError:
-        #     print("AttributeError with scipy")
-        #     pass
     else:
         p = mat["params"]
         try:
@@ -242,17 +234,9 @@ def main():
     # ── 3. Build per-metabolite spectra ──────────────────────
     met_spectra = []
     for i, key in enumerate(MET_KEYS):
-        # if not ("mm" in key or "lip" in key):
-        # if not ("lip" in key):
         fid_b = apply_broadening(basis_fids[key], d_vec[i], g_vec[i], t)
         fid_b = fid_to_spectrum(fid_b)
-        # if "mm" in key or "lip" in key: fid_b = np.zeros_like(fid_b)#np.flip(fid_b)
         met_spectra.append(fid_b * a_vec[i])
-            # try:
-            #     fid_b = fid_to_spectrum(basis_fids[key])#*1000
-            #     met_spectra.append(fid_b)
-            # except KeyError:
-            #     pass
     met_spectra = np.fliplr(np.array(met_spectra))   # [N_met, N_pts]
     
     met_spectra = met_spectra / np.amax(met_spectra) * np.amax(spec_real)
@@ -267,61 +251,6 @@ def main():
     height_ratios  = [TOP_RATIO] + [1] * N_MET #+ [1]
     total_h        = FIG_WIDTH * (sum(height_ratios) / (TOP_RATIO + 1)) * 0.55#+ 2)) * 0.55
 
-    # fig = plt.figure(figsize=(FIG_WIDTH, total_h))
-    # gs  = gridspec.GridSpec(
-    #     n_rows, 1, figure=fig,
-    #     height_ratios=height_ratios,
-    #     hspace=0.0,
-    #     left=0.03, right=0.86,
-    #     top=0.98,  bottom=0.05,
-    # )
-    # axes = [fig.add_subplot(gs[i]) for i in range(n_rows)]
-    # for ax in axes[1:]:
-    #     ax.sharex(axes[0])
-
-    # # ── 6. Top panel ──────────────────────────────────────────
-    # ax0 = axes[0]
-    # ax0.axvline(x=0, color="silver", lw=0.8, zorder=0)
-    # ax0.plot(ppm, spec_real, color="black",     lw=0.9, label="data",     zorder=2)
-    # if SHOW_FIT:
-    #     ax0.plot(ppm, fit_real,  color="red",   lw=0.9, label="fit",      zorder=3)
-    # ax0.plot(ppm, rw_real+bl_real, color="green", lw=0.9, label="residual water", zorder=3)
-    # ax0.plot(ppm, bl_real,       color="royalblue", lw=0.9, label="baseline", zorder=3)
-    # ax0.legend(loc="upper right", fontsize=7, frameon=False, handlelength=1.2)
-    # # xlim inverted (high → low); the renderer clips everything outside automatically
-    # ax0.set_xlim(ppm_hi, ppm_lo)
-    # _clean_ax(ax0)
-
-    # # ── 7. Metabolite panels ──────────────────────────────────
-    # for i, (lbl, sp) in enumerate(zip(MET_LABELS, met_spectra)):
-    #     ax = axes[i + 1]
-    #     ax.axvline(x=0, color="silver", lw=0.4, zorder=0)
-    #     ax.plot(ppm, sp, color="black", lw=0.6)
-    #     _clean_ax(ax)
-    #     _pad_ylim(ax)
-    #     ax.annotate(lbl, xy=(1.01, 0.5), xycoords="axes fraction",
-    #                 fontsize=6.5, va="center", ha="left")
-
-    # # ── 8. Residual water panel ───────────────────────────────
-    # ax_w = axes[-1]
-    # residual = spec_real - bl_real - fit_real
-    # ax_w.axvline(x=0, color="silver", lw=0.4, zorder=0)
-    # # ax_w.plot(ppm, rw_real, color="black", lw=0.6)
-    # ax_w.plot(ppm, residual, color="black", lw=0.6)
-    # _clean_ax(ax_w)
-    # # _pad_ylim(ax_w)
-    # ax_w.annotate("H\u2082O", xy=(1.01, 0.5), xycoords="axes fraction",
-    #               fontsize=6.5, va="center", ha="left")
-
-    # # x-axis ticks on the bottom panel only
-    # ax_w.tick_params(bottom=True, labelbottom=True, labelsize=8)
-    # ax_w.xaxis.set_major_locator(MultipleLocator(0.5))
-    # ax_w.xaxis.set_minor_locator(MultipleLocator(0.1))
-    # ax_w.tick_params(which="major", length=4)
-    # ax_w.tick_params(which="minor", length=2)
-    # ax_w.spines["bottom"].set_visible(True)
-    # ax_w.set_xlabel("Chemical Shift (ppm)", fontsize=9)
-    
     fig, ax = plt.subplots(figsize=(FIG_WIDTH*1.2, FIG_WIDTH))
 
     # ── Define vertical offset ───────────────────────────────────
@@ -335,14 +264,10 @@ def main():
 
     # ── 6. Top spectrum (data + model components) ────────────────
     # ax.axvline(x=0, color="silver", lw=2.8, zorder=0)
-
     ax.plot(ppm, spec_real*rx + offset, color="black", lw=0.9, label="data", zorder=2)
 
     if SHOW_FIT:
         ax.plot(ppm, fit_real*rx + offset, color="red", lw=0.9, label="fit", zorder=3)
-
-    # ax.plot(ppm, (rw_real + bl_real)*rx + offset, color="green", lw=0.9,
-    #         label="residual water", zorder=3)
 
     ax.plot(ppm, bl_real*rx + offset, color="royalblue", lw=0.9,
             label="baseline", zorder=3)
@@ -358,11 +283,6 @@ def main():
 
     # ── 7. Metabolite spectra (stacked with offsets) ─────────────
     for lbl, sp in zip(MET_LABELS, met_spectra):
-        # if "mm" in lbl and rx1==rx:
-        #     rx1 = 2*rx
-        # if "mm" in lbl:
-        #     sp = np.flip(sp)
-        # ax.plot(ppm, sp*.025 + offset, color="black", lw=0.6)
         ax.plot(ppm, sp*rx1 + offset, color="black", lw=0.6)
 
         # Label on the right
@@ -381,11 +301,7 @@ def main():
     
     # ── 8. Residual water panel ───────────────────────────────
     # residual = spec_real - bl_real - fit_real
-    # ax_w.axvline(x=0, color="silver", lw=0.4, zorder=0)
     ax.plot(ppm, rw_real*rx + offset, color="black", lw=0.6)
-    # ax_w.plot(ppm, residual, color="black", lw=0.6)
-    # _clean_ax(ax_w)
-    # _pad_ylim(ax_w)
     ax.annotate("Res H\u2082O", xy=(1.01, offset), xycoords=("axes fraction", "data"),
                   fontsize=ANNOT_FS, va="center", ha="left")
     offset -= OFFSET_STEP
@@ -413,10 +329,8 @@ def main():
     y_min = min(np.min(d) for d in all_data) - OFFSET_STEP * (len(all_data)+2)#1)
     y_max = np.max(spec_real)*rx*1.25 + OFFSET_STEP
     ax.set_ylim(y_min, y_max)
-    # ax.set_ylim(-20,15)
     print("ymin: {}, ymax: {}".format(y_min,y_max))
     
-
     # ── 9. Save / show ────────────────────────────────────────
     if SAVE_PATH:
         fig.savefig(SAVE_PATH, dpi=300, bbox_inches="tight")
