@@ -53,8 +53,7 @@ class PhysicsModel(nn.Module):
                         self.header = value
                         for k, v in dct[key].items():
                             if str(k)=='ppm': 
-                                k, v = '_ppm', v#torch.flip(v.unsqueeze(0), 
-                                                 #         dims=[-1,0]).squeeze(0)
+                                k, v = '_ppm', v
                             if not isinstance(v, str): 
                                 self.register_buffer(str(k), v.float())
                     elif str(key)=='ranges':
@@ -212,9 +211,10 @@ class PhysicsModel(nn.Module):
                              self.syn_basis_fids.shape[-1]]).squeeze())
         self.register_buffer('length', torch.FloatTensor([length]).squeeze())
         self.register_buffer('ppm_ref', torch.FloatTensor([ppm_ref]).squeeze())
-        self.register_buffer('ppm_cropped', torch.fliplr(torch.linspace(
+        # self.register_buffer('ppm_cropped', torch.fliplr(torch.linspace(
+        self.register_buffer('ppm_cropped', torch.linspace(
                              float(self.cropRange[0]), float(self.cropRange[1]), 
-                             length).unsqueeze(0)))
+                             length).unsqueeze(0))
 
         self.spectral_resolution = spectral_resolution
         self.image_resolution = image_resolution
@@ -1233,7 +1233,7 @@ class PhysicsModel(nn.Module):
                   ppm: torch.Tensor=None,
                   length: int=512,
                   target_range: list=None,
-                  flip: bool=True,
+                #   flip: bool=False,
                  ) -> torch.Tensor:
         '''
         Basic Cubic Hermite Spline Interpolation of :param signal: with no 
@@ -1258,14 +1258,15 @@ class PhysicsModel(nn.Module):
                              steps=int(length)).to(signal.device)
         for i in range(signal.ndim - new.ndim): new = new.unsqueeze(0)
 
-        if flip: 
-            signal = torch.flip(signal, dims=[-1])
+        # if flip: 
+        #     # signal = torch.flip(signal, dims=[-1])
+        #     pass
 
         chs_interp = CubicHermiteInterp(ppm, signal)
         signal = chs_interp.interp(new)
 
-        if flip: 
-            return torch.flip(signal, dims=[-1])
+        # if flip: 
+        #     return torch.flip(signal, dims=[-1])
 
         return signal
     
@@ -1655,8 +1656,8 @@ class PhysicsModel(nn.Module):
             # Crop and resample spectra
             if resample:
                 # print('resampling spectra')
-                specSummed = self.resample_(signal=specSummed, length=self.length, flip=False)
-                spectral_fit = self.resample_(signal=spectral_fit, length=self.length, flip=False)
+                specSummed = self.resample_(signal=specSummed, length=self.length)
+                spectral_fit = self.resample_(signal=spectral_fit, length=self.length)
         else:
             specSummed = fidSum
             # spectral_fit = spectral_fit # redundant
@@ -1687,11 +1688,11 @@ class PhysicsModel(nn.Module):
             t = torch.linspace(self.t.amin(), self.t.amax(), #num_pts)
                                max(self.t.squeeze().shape))
             specSummed = self.resample_(signal=specSummed, length=self.length, 
-                                        ppm=t, flip=False, 
+                                        ppm=t,  
                                         target_range=[self.t.amin(), 
                                                       self.t.amax()])
             spectral_fit = self.resample_(signal=spectral_fit, length=self.length, 
-                                          ppm=t, flip=False, target_range=[
+                                          ppm=t, target_range=[
                                           self.t.amin(), self.t.amax()])
 
 
