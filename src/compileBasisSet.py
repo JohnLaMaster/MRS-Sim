@@ -5,6 +5,7 @@ import os
 import numpy as np
 import scipy.io as io
 
+import re
 import copy
 import matplotlib.pyplot as plt
 
@@ -61,7 +62,7 @@ def main(args: str):
                     axis=0
                 ), axis=0)
             except KeyError:
-                metabolites.update(metab={
+                metabolites.update({metab: {
                     'fid': np.expand_dims(np.stack(
                     [np.squeeze(exptDat['fid'].real), 
                     np.squeeze(exptDat['fid'].imag)], 
@@ -69,7 +70,9 @@ def main(args: str):
                 ), axis=0),
                 'min':0.0,
                 'max':1.0}
-                )
+                })
+                
+    metabolites = reorder_metabolite_struct(metabolites)
 
     # # Store edited spectra if needed
     # if config['edit_off_path']:
@@ -93,13 +96,14 @@ def main(args: str):
     
     # Save output file
     if not args.save_name:
-        save_name = '{}_{}ms_{}_{}.mat'.format(seq,te,vendor,header['spectralwidth'])
+        save_name = '{}_{}ms_{}_{}'.format(seq,te,vendor,header['spectralwidth'])
         if args.save_name_prefix: save_name = '{}_{}'.format(args.save_name_prefix, save_name)
         if args.save_name_suffix: save_name = '{}_{}'.format(save_name, args.save_name_suffix)
+        save_name = '{}.mat'.format(save_name)
     else:
         save_name = args.save_name
 
-    path = os.path.join(os.getcwd(),'basis_sets')
+    path = os.path.join(os.getcwd(),'src/basis_sets')
     save_path = os.path.join(path, save_name)
     io.savemat(save_path, mdict={'metabolites': metabolites, 'header': header})#, 'artifacts': artifacts})
     print('Saved the {} basis set at: {}'.format(save_name,path))
@@ -124,6 +128,8 @@ def visual_inspection(metabolites, ppm):
             tmp = [np.reshape(metabolites[f]['fid'], (1, 2, shape[-1])) for f in fn]
             stacked = np.concatenate(tmp, axis=0)
 
+    legend = [f for f in fn]
+
     # --- Convert to complex ---
     fid = stacked[:, 0, :] + 1j * stacked[:, 1, :]
 
@@ -138,6 +144,7 @@ def visual_inspection(metabolites, ppm):
         plt.plot(ppm.squeeze(), np.real(spec[i, :]))
     plt.xlim([0, 5])
     plt.gca().invert_xaxis()
+    plt.legend(legend)
     plt.show()
 
     # =========================================================
@@ -185,6 +192,77 @@ def loadmat_as_dict(filename):
 
     data = io.loadmat(filename, struct_as_record=False, squeeze_me=True)
     return _check_keys(data)
+
+
+def reorder_metabolite_struct(S):
+    """
+    Recursively reorder a MATLAB-like struct (Python dict).
+
+    Order:
+    1. Alphabetical (non-MM, non-Lip)
+    2. MM* sorted numerically by suffix
+    3. Lip* sorted numerically by suffix
+    """
+
+    # --- Base cases ---
+    if isinstance(S, list):
+        return [reorder_metabolite_struct(x) for x in S]
+
+    if not isinstance(S, dict):
+        return S
+
+    fn = list(S.keys())
+    fn_lower = [f.lower() for f in fn]
+
+    is_mm  = [f.startswith('mm') for f in fn_lower]
+    is_lip = [f.startswith('lip') for f in fn_lower]
+    is_other = [not (mm or lip) for mm, lip in zip(is_mm, is_lip)]
+
+    # --- Split groups ---
+    other_fields = sorted([f for f, keep in zip(fn, is_other) if keep])
+    mm_fields    = sort_special_fields([f for f, keep in zip(fn, is_mm) if keep], 'mm')
+    lip_fields   = sort_special_fields([f for f, keep in zip(fn, is_lip) if keep], 'lip')
+
+    new_order = other_fields + mm_fields + lip_fields
+
+    # --- Rebuild ordered dict ---
+    S_ordered = {}
+    for f in new_order:
+        val = S[f]
+        if isinstance(val, (dict, list)):
+            val = reorder_metabolite_struct(val)
+        S_ordered[f] = val
+
+    return S_ordered
+
+
+def sort_special_fields(fields, prefix):
+    """
+    Sort fields like:
+        MM09, MM092, MM12, MM121
+
+    Correctly distinguishes:
+        MM09 ≠ MM092  (no prefix confusion)
+
+    Sorting rule:
+        1. numeric suffix (09 -> 9, 092 -> 92)
+        2. then full string (stable tie-breaker)
+    """
+
+    if not fields:
+        return fields
+
+    prefix = prefix.lower()
+
+    def extract_number(name):
+        # strict match: prefix + digits ONLY at start
+        match = re.match(rf'^{prefix}(\d+)$', name, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+        return float('inf')  # non-matching go last
+
+    # sort by numeric value, then by full string to avoid ambiguity
+    return sorted(fields, key=lambda x: (extract_number(x), x))
 
 
 if __name__=='__main__':

@@ -39,6 +39,8 @@ from matplotlib.ticker import MultipleLocator
 import scipy.io
 import h5py
 
+from collections import OrderedDict
+
 # ══════════════════════════════════════════════════════════════
 #  USER SETTINGS
 # ══════════════════════════════════════════════════════════════
@@ -49,7 +51,7 @@ SPECTRUM_IDX = 0                # batch index (0-based)
 # PPM_RANGE    = (4.2, 0.2)       # (high_ppm, low_ppm)
 # PPM_RANGE    = (9.0, -1.0)       # (high_ppm, low_ppm)
 PPM_RANGE    = (11.0, -3.0)       # (high_ppm, low_ppm)
-# PPM_RANGE    = (5.0,  0.5)       # (high_ppm, low_ppm)
+PPM_RANGE    = (5.0,  0.5)       # (high_ppm, low_ppm)
 SHOW_FIT     = True
 FIG_WIDTH    = 8.5              # inches
 TOP_RATIO    = 10                # height of spectrum panel vs. one metabolite row
@@ -63,24 +65,16 @@ LEGEND_FS  = 9    # legend
 
 # Metabolite order must match the column order of params.d and params.g,
 # and is the order in which params.<key> amplitude fields are stacked.
-MET_KEYS = [
-    "asc", "asp", "ch",  "cr",   "gaba", "gln",  "glu",  "gpc",
-    "gsh", "lac", "mi",  "naa",  "naag", "pch",  "pcr",  "pe",
-    "si",  "tau", 
-    # "mm092","mm121", "mm139", #"mm167",  "mm204", "mm226", "mm270",
-    # "mm299", "mm321", "mm375",
-    # "mm09","mm12", "mm14", "mm17",  "mm20",
-    # "lip09","lip13","lip20",
-]
 MET_LABELS = [
     "Asc",  "Asp",  "Ch",   "Cr",   "GABA", "Gln",  "Glu",  "GPC",
     "GSH",  "Lac",  "MI",   "NAA",  "NAAG", "PCh",  "PCr",  "PE",
     "SI",   "Tau",
-    # "MM092","MM121", "MM139", #"MM167",  "MM204", "MM226", "MM270",
-    # "MM299", "MM321", "MM375",
+    "MM092","MM121", "MM139", "MM167",  "MM204", "MM226", "MM270",
+    "MM299", "MM321", "MM375",
     # "MM09", "MM12", "MM14", "MM17",  "MM20",
     # "Lip09","Lip13","Lip20",
 ]
+MET_KEYS = [l.lower() for l in MET_LABELS]
 N_MET = len(MET_KEYS)
 
 
@@ -122,17 +116,14 @@ def load_basis(basis_file):
     fids : dict  {met_key: complex_1d_array  shape [N_pts]}
     t    : 1-D float array  (time vector in seconds, from header.t)
     """
-    print(basis_file)
+    # print(basis_file)
     # ── h5py (HDF5 / MATLAB v7.3) ─────────────────────────────
     try:
         f = h5py.File(basis_file, "r")
         t = np.asarray(f["header"]["t"]).squeeze()
-        # print(f["metabolites"].keys())
-        # input()
-        fids = {}
+        fids = OrderedDict()#{}
         for key in MET_KEYS:
             raw = np.asarray(f["metabolites"][key]["fid"])   # [2, N]
-            # if "mm" in key or "lip" in key: raw = np.fliplr(raw)
             fids[key] = raw[0] + 1j * raw[1]
         return fids, t
     except (OSError, KeyError):
@@ -141,13 +132,10 @@ def load_basis(basis_file):
     # ── scipy fallback (MATLAB ≤ v7) ──────────────────────────
     d = scipy.io.loadmat(basis_file, squeeze_me=True, struct_as_record=False)
     t = np.asarray(d["header"].t).squeeze()
-    fids = {}
+    fids = OrderedDict()
     for key in MET_KEYS:
-        # print(d["metabolites"].__dict__.keys())
-        # input()
         try:
             raw = np.asarray(d["metabolites"].__dict__[key].fid)  # [2, N]
-            # if "mm" in key or "lip" in key: raw = np.fliplr(raw)
             fids[key] = raw[0] + 1j * raw[1]
         except KeyError:
             print("KeyError when loading the basis set.")
@@ -215,8 +203,8 @@ def main():
     rw_real   = to_complex(np.asarray(mat["residual_water"]))[idx,:].real
     
     spec_real = np.fft.fftshift(np.fft.fft(spec),axes=-1).real[0,:]
-    print('spec.shape: ',spec.shape)
-    print('spec.amax: ',np.amax(spec))
+    print('spec.shape (FID): ',spec.shape)
+    print('spec.amax (FID): ',np.amax(spec))
     print('spec_real.amax: ',np.amax(spec_real))
     denom = np.amax(spec_real)
     spec_real = spec_real / denom
@@ -255,17 +243,17 @@ def main():
     met_spectra = []
     for i, key in enumerate(MET_KEYS):
         # if not ("mm" in key or "lip" in key):
-        if not ("lip" in key):
-            fid_b = apply_broadening(basis_fids[key], d_vec[i], g_vec[i], t)
-            fid_b = fid_to_spectrum(fid_b)
-            # if "mm" in key or "lip" in key: fid_b = np.zeros_like(fid_b)#np.flip(fid_b)
-            met_spectra.append(fid_b * a_vec[i])
+        # if not ("lip" in key):
+        fid_b = apply_broadening(basis_fids[key], d_vec[i], g_vec[i], t)
+        fid_b = fid_to_spectrum(fid_b)
+        # if "mm" in key or "lip" in key: fid_b = np.zeros_like(fid_b)#np.flip(fid_b)
+        met_spectra.append(fid_b * a_vec[i])
             # try:
             #     fid_b = fid_to_spectrum(basis_fids[key])#*1000
             #     met_spectra.append(fid_b)
             # except KeyError:
             #     pass
-    met_spectra = np.flip(np.array(met_spectra))   # [N_met, N_pts]
+    met_spectra = np.fliplr(np.array(met_spectra))   # [N_met, N_pts]
     
     met_spectra = met_spectra / np.amax(met_spectra) * np.amax(spec_real)
 
@@ -334,7 +322,7 @@ def main():
     # ax_w.spines["bottom"].set_visible(True)
     # ax_w.set_xlabel("Chemical Shift (ppm)", fontsize=9)
     
-    fig, ax = plt.subplots(figsize=(FIG_WIDTH*1.1, FIG_WIDTH))
+    fig, ax = plt.subplots(figsize=(FIG_WIDTH*1.2, FIG_WIDTH))
 
     # ── Define vertical offset ───────────────────────────────────
     spec_range = np.max(spec_real) - np.min(spec_real)
@@ -366,6 +354,7 @@ def main():
     offset -= OFFSET_STEP
     rx /= 1.25
     rx1 = rx
+    mm = 0
 
     # ── 7. Metabolite spectra (stacked with offsets) ─────────────
     for lbl, sp in zip(MET_LABELS, met_spectra):
@@ -383,8 +372,13 @@ def main():
                     fontsize=ANNOT_FS, va="center", ha="left")
 
         offset -= OFFSET_STEP
+        if lbl.lower().startswith("mm"): mm += sp*rx1
         
-        
+    ax.plot(ppm, mm + offset, color='black', lw=0.6)
+    ax.annotate("MM Sum", xy=(1.01, offset), xycoords=("axes fraction", "data"),
+                  fontsize=ANNOT_FS, va="center", ha="left")
+    offset -= OFFSET_STEP
+    
     # ── 8. Residual water panel ───────────────────────────────
     # residual = spec_real - bl_real - fit_real
     # ax_w.axvline(x=0, color="silver", lw=0.4, zorder=0)
@@ -397,7 +391,8 @@ def main():
     offset -= OFFSET_STEP
 
     # ── 8. Axis formatting ───────────────────────────────────────
-    ax.set_xlim(ppm_hi, ppm_lo)
+    ax.set_xlim(ppm_lo, ppm_hi)
+    ax.invert_xaxis()
 
     # X-axis ticks only (bottom, as requested)
     ax.xaxis.set_major_locator(MultipleLocator(0.5))
@@ -415,7 +410,7 @@ def main():
     # Optional: tighten vertical limits to content
     all_data = [spec_real] + list(met_spectra)
     y_min = min(np.min(d*.05) for d in all_data) - OFFSET_STEP * (len(all_data)+1)
-    y_min = min(np.min(d) for d in all_data) - OFFSET_STEP * (len(all_data)+1)
+    y_min = min(np.min(d) for d in all_data) - OFFSET_STEP * (len(all_data)+2)#1)
     y_max = np.max(spec_real)*rx*1.25 + OFFSET_STEP
     ax.set_ylim(y_min, y_max)
     # ax.set_ylim(-20,15)
