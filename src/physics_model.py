@@ -1,5 +1,6 @@
 import copy
 import os
+import json
 from collections import OrderedDict
 from functools import reduce
 from math import ceil, floor
@@ -36,28 +37,37 @@ class PhysicsModel(nn.Module):
         # Load basis spectra, concentration ranges, and units
         paths = ['./src/basis_sets/' + PM_basis_set, # 'fitting_basis_ge_PRESS144.mat'
                  './src/basis_sets/artifacts.mat',
-                 './src/basis_sets/ranges_30ms.mat']#,
+                #  './src/basis_sets/ranges_30ms.mat',
+                 './src/basis_sets/metabolites_database.json']#,
                 #  './src/basis_sets/ranges_{}ms.mat'.format(TE)]
         self.basisFcns = {}
         self.PM_basis_set = PM_basis_set
 
         for path in paths:
             with open(path, 'rb') as file:
-                dct = convertdict(io.loadmat(file,simplify_cells=True))
-                for key, value in dct.items():
-                    if str(key)=='metabolites': 
-                        self.basisFcns['metabolites'] = value
-                    elif str(key)=='artifacts': 
-                        self.basisFcns['artifacts'] = value
-                    elif str(key)=='header':
-                        self.header = value
-                        for k, v in dct[key].items():
-                            if str(k)=='ppm': 
-                                k, v = '_ppm', v
-                            if not isinstance(v, str): 
-                                self.register_buffer(str(k), v.float())
-                    elif str(key)=='ranges':
-                        self.ranges = value
+                if path.endswith('.mat'):
+                    dct = convertdict(io.loadmat(file,simplify_cells=True))
+                    for key, value in dct.items():
+                        if str(key)=='metabolites': 
+                            self.basisFcns['metabolites'] = value
+                        elif str(key)=='artifacts': 
+                            self.basisFcns['artifacts'] = value
+                        elif str(key)=='header':
+                            self.header = value
+                            for k, v in dct[key].items():
+                                if str(k)=='ppm': 
+                                    k, v = '_ppm', v
+                                if not isinstance(v, str): 
+                                    self.register_buffer(str(k), v.float())
+                        elif str(key)=='ranges':
+                            self.ranges = value
+                elif path.endswith('.json'):
+                    self.ranges = json.load(file)
+                    
+                    # mets = dct.keys()
+                    # for m in mets:
+                    #     temp = {m: {}}
+                    #     self.ranges.update({m:dct[m]['Conc']})
 
         
     def __repr__(self):
@@ -142,6 +152,8 @@ class PhysicsModel(nn.Module):
         self._basis_metab = []
         self.wrt_metab = wrt_metab
         self.snr_metab = snr_metab if not isinstance(snr_metab, type(None)) else wrt_metab
+
+        # print('self._metab: {}, l: {}, self.MM: {}'.format(self._metab, l, self.MM))
 
         # Add metabolite names to dictionary
         dct = OrderedDict()
@@ -285,7 +297,7 @@ class PhysicsModel(nn.Module):
         # Define the min/max ranges for quantifying the variables
         # print('header: ',header) # correct
         # print('type(header): ',type(header))
-        self.define_parameter_ranges(header=header)
+        self.define_parameter_ranges(header=header, num_mets=l+self.MM)
 
 
         self.totals = []
@@ -362,15 +374,22 @@ class PhysicsModel(nn.Module):
         return dct, ind
 
     def define_parameter_ranges(self,
-                                header: List[str]) -> None:
+                                header: List[str],
+                                num_mets: int) -> None:
+        # print("header: ",header)
+        # num_mets = len(self._metab)
         self.min_ranges = torch.zeros([1,len(header)], dtype=torch.float32)
         self.max_ranges = torch.zeros_like(self.min_ranges)
         for i, m in enumerate(header):
             met, temp, strt = False, None, None
             if m.lower() in self.basisFcns['metabolites'].keys(): 
                 # temp = self.basisFcns['metabolites'][m.lower()]
-                temp = self.ranges[m.lower()]
+                temp = self.ranges[m.lower()]['Conc']
                 met = True
+            elif m in ['d','dmm']:
+                # print(i, m, num_mets, i-num_mets, header[i-num_mets])
+                met = header[i-num_mets]
+                temp = self.ranges[met.lower()]['T2']['metab']
             elif m in self.basisFcns['artifacts'].keys(): 
                 temp = self.basisFcns['artifacts'][m]
             elif m in ['fshiftmet','fshiftmm']:
@@ -385,8 +404,12 @@ class PhysicsModel(nn.Module):
                     default = 0.05 # ppm
                     temp = {'min': -default, 'max': default}
             if temp:
-                self.min_ranges[0,i] = temp['min']
-                self.max_ranges[0,i] = temp['max']
+                try:
+                    self.min_ranges[0,i] = temp['min']
+                    self.max_ranges[0,i] = temp['max']
+                except TypeError:
+                    self.min_ranges[0,i] = temp['min'][0]
+                    self.max_ranges[0,i] = temp['max'][0]
 
                 '''
                 TODO: How and where to store the temperature induced fshift information?
@@ -1670,7 +1693,6 @@ class PhysicsModel(nn.Module):
         
         # Normalize
         if not isinstance(noise, bool): 
-            # print(noise)
             # if noise==False:
             specSummed, denom = self.normalize(signal=specSummed, noisy=d)
         else:
