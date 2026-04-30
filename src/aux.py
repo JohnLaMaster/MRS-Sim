@@ -121,7 +121,7 @@ def convertdict(file, simple=False, device='cpu'):
                 file[k] = dict({str(a): torch.from_numpy(np.asarray(b, 
                     dtype=np.float32)).to(device) for a, b in zip(file[k][0,:], 
                                                                 file[k][1,:])})
-            elif k in ['notes', 'seq','vendor','pulse_sequence']:
+            elif k in ['notes', 'seq','vendor','pulse_sequence', 'pulseSequence']:
                 delete.append(k)
             else:
                 file[k] = torch.from_numpy(np.asarray(file[k], 
@@ -161,14 +161,27 @@ def dict2tensors(dct: dict) -> dict:
         if isinstance(value, dict):
             dict2tensors(value)
 
+def _fftshift(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
+    return torch.roll(x, shifts=x.shape[dim] // 2, dims=dim)
+
+def _ifftshift(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
+    return torch.roll(x, shifts=-(x.shape[dim] // 2), dims=dim)
                       
 def Fourier_Transform(signal: torch.Tensor) -> torch.Tensor: 
     assert(signal.ndim>=3)
     signal = signal.transpose(-1,-2)
     assert(signal.shape[-1]==2)
     signal = torch.view_as_complex(signal.contiguous())
-    signal = torch.view_as_real(fftshift(fft(signal, dim=-1), 
+    signal = torch.view_as_real(_fftshift(fft(signal, dim=-1), 
                                 dim=-1)).transpose(-1,-2)
+    return signal.contiguous()
+
+def rFourier_Transform(signal: torch.Tensor) -> torch.Tensor: 
+    assert(signal.ndim>=3) 
+    assert(signal.shape[-2]==1) 
+    signal = torch.view_as_real(
+        _fftshift(rfft(signal.squeeze(-2), dim=-1), 
+                 dim=-1)).transpose(-1,-2) 
     return signal.contiguous()
 
 
@@ -214,7 +227,7 @@ def inv_Fourier_Transform(signal: torch.Tensor,
     assert(signal.shape[-1]==2)
 
     signal = torch.view_as_complex(signal.contiguous())
-    signal = torch.view_as_real(ifft(ifftshift(signal, dim=-1),
+    signal = torch.view_as_real(ifft(_ifftshift(signal, dim=-1),
                                      dim=-1)).transpose(-1,-2)
     return signal.contiguous()
 
