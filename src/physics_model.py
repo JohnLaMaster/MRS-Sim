@@ -380,6 +380,9 @@ class PhysicsModel(nn.Module):
         # num_mets = len(self._metab)
         self.min_ranges = torch.zeros([1,len(header)], dtype=torch.float32)
         self.max_ranges = torch.zeros_like(self.min_ranges)
+        self.new_params_assert_msg = None
+        self.new_params = OrderedDict()
+                                    
         for i, m in enumerate(header):
             met, temp, strt = False, None, None
             if m.lower() in self.basisFcns['metabolites'].keys(): 
@@ -403,6 +406,14 @@ class PhysicsModel(nn.Module):
                     # If not included in the basis set, then set a default
                     default = 0.05 # ppm
                     temp = {'min': -default, 'max': default}
+            else:
+                # Allow metabolties outside of the database to be included
+                # These are placeholder values that then need to be defined via the 'paramters'
+                # field of the simulation's config file and set using set_parameter_constraints()
+                self.new_params[m] = i
+                temp['min'] = 0
+                temp['max'] = 1
+                
             if temp:
                 try:
                     self.min_ranges[0,i] = temp['min']
@@ -415,6 +426,8 @@ class PhysicsModel(nn.Module):
                 TODO: How and where to store the temperature induced fshift information?
                 Same for the T2 info!
                 '''
+            if len(new_params)>0:
+                self.new_params_assert_msg = f'The following parameters are being used but have not had their preset values defined:'#.format([k for k in self.new_params.keys())
 
     
     def add_inhomogeneities(self,
@@ -1346,6 +1359,12 @@ class PhysicsModel(nn.Module):
                 else:
                     self.min_ranges[:,ind] = cfg[k][0]
                     self.max_ranges[:,ind] = cfg[k][1]
+                
+                if k in self.new_params.keys(): 
+                    self.new_params.pop(k)
+        
+        assert len(self.new_params.keys())==0, self.new_params_assert_msg + '\n {}'.format([k for k in self.new_params.keys()])
+            
     
         
     def simulate_offsets(self,
