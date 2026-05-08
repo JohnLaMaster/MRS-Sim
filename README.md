@@ -20,6 +20,8 @@ _Abstract:_
 # Basis Sets
 Currently, two basis sets will be uploaded. They are GE PRESS sequences with a spectral width of 2000, 8192 data points, and TE=30 & 144ms. Additional basis sets will be add occasionally. I am currently switching from metabolite-level basis sets to spin-level basis sets to increase the spectral components that can be modeled. When that is finished, updated basis sets will be provided.
 
+Basis sets can be compiled from the following formats: .RAW, .BASIS, .MAT (Osprey and MARSS). .JSON (FSL-MRS) is coming soon. If you used MRSCloud to simulate your basis sets, you need to use the '--MRSCloud' flag because they store their basis functions differently from other simulators.
+
 # What makes this model special?
 There are several notable differences from standard simulation models. 
 
@@ -67,7 +69,7 @@ An Open Science Framework project is being put together. The goal of this data r
 Simulation software only works with numerical values. While not the main focus of this work, a database has been compiled with spin definitions and corresponding concentrations and T2 values. I am also looking to include temperature- and pH-induced artifacts and to add X-nuclei as well. If you have literature suggestions or data yourself, please feel free to reach out so we can include it.
 
 # Working with the model
-If you use one of the provided configuration templates, please cite the paper below (citation will appear once published). If you would like to collaborate to create a dataset, please reach out at john.t.lamaster (at) gmail dot com.
+If you use one of the provided configuration templates, please cite the paper below. If you would like to collaborate to create a dataset, please reach out at john.t.lamaster (at) gmail dot com.
 
 # Citation
 If you use any part of this codebase, please cite the following publication:
