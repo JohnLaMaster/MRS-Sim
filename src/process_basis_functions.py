@@ -33,7 +33,7 @@ gamma_nucleus = {
 #   metabolites : {name (str) → complex FID (1-D np.ndarray)}
 # ─────────────────────────────────────────────────────────────────────────────
 
-def load_marss_mat(filepath: str):
+def load_marss_mat(filepath: str, config: str=None):
     """
     Load a single MARSS .mat basis file.
 
@@ -57,11 +57,8 @@ def load_marss_mat(filepath: str):
     sw  = float(np.squeeze(exptDat['sw_h']))
     sf  = float(np.squeeze(exptDat['sf']))      # MHz -> stored as Hz below
     ns  = int(np.squeeze(exptDat['nspecC']))
-    # print("exptDat['fid'].shape: ",exptDat['fid'].shape,exptDat['fid'][0].shape,exptDat['fid'][0][0].shape)
-    # print(type(exptDat['fid']))
-    # print(exptDat['fid'].dtype)
-    # print(exptDat['fid'][0].dtype)
-    # print(type(exptDat['fid'][0]))
+    lw = float(1.0) # default basis functions are broadened by 1.0 Hz in MARSS
+    
     try:
         fid = np.squeeze(exptDat['fid']).astype(complex)
     except TypeError:
@@ -69,7 +66,13 @@ def load_marss_mat(filepath: str):
     name = os.path.splitext(os.path.basename(filepath))[0].lower()
 
     # sf from MARSS is in MHz; convert to Hz so all loaders use consistent units
-    header_info = {'sw': sw, 'sf': sf * 1e6, 'ns': ns}
+    header_info = {'sw': sw, 'sf': sf * 1e6, 'ns': ns, 'lw': lw}
+
+    if config:
+        config = io.loadmat(config)
+        header_info['b0'] = float(config.B0)
+        header_info['centerFreq'] = float(config.referencePeak)
+        
     return header_info, {name: fid}
 
 
@@ -743,7 +746,7 @@ def main(config: dict):
             if 'BASIS' in raw_peek:
                 hinfo, mets = load_osprey_mat(filepath)
             else:
-                hinfo, mets = load_marss_mat(filepath)
+                hinfo, mets = load_marss_mat(filepath, config['sim_config'])
             if not header_set:
                 build_header_fields(header, hinfo, config, te_override=te)
                 header_set = True
@@ -948,6 +951,7 @@ if __name__ == '__main__':
         default=None,#'./src/configurations/debug_new_init.json',
         help='Path to the JSON configuration file. Must include the arguments in this parser.')
     parser.add_argument('--spin_path', type=str, default='~/Documents/Repositories/MARSSCompiled/VERI_GE_PRESS_30ms/SummedSpins_for_MARSSinput')
+    parser.add_argument('--sim_config', type=str, default=None, help='Basis set config file, if available.')
     parser.add_argument('--save_subdir', type=str, default=None, help='Specify a subdir inside the basis_sets dir for storing this compiled basis set.')
     parser.add_argument('--save_name', type=str, default=None)
     parser.add_argument('--save_name_prefix', type=str, default=None)
