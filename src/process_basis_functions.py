@@ -555,8 +555,8 @@ def load_fsl_mrs_basis_dir(dirpath: str):
         if 'basis_re' not in data or 'basis_im' not in data:
             continue
 
-        fid_re = np.asarray(data['basis_re'], dtype=float)
-        fid_im = np.asarray(data['basis_im'], dtype=float)
+        fid_re = np.asarray(data['basis']['basis_re'], dtype=float)
+        fid_im = np.asarray(data['basis']['basis_im'], dtype=float)
         if fid_re.size == 0:
             print(f"  [warn] Empty FID in {filename}, skipping.")
             continue
@@ -568,17 +568,19 @@ def load_fsl_mrs_basis_dir(dirpath: str):
 
         # Populate header_info from the first valid file only
         if header_info is None:
-            dt  = float(data.get('basis_dwell', 1e-4))   # seconds
+            dt  = float(data['basis'].get('basis_dwell'))   # seconds
             sw  = 1.0 / dt if dt > 0 else 0.0
             # basis_hzperppm is an optional field (Hz/ppm = spectrometer freq
             # in MHz). It is not enumerated in the official FSL-MRS docs but
             # may be present in simulator output. Falls back to config.
-            sf_hzperppm = float(data.get('basis_hzperppm', 0.0))
+            sf_hzperppm = float(data.get('basis_centre'))
             # Hz/ppm * 1e6 = Hz (spectrometer frequency)
             sf  = sf_hzperppm * 1e6 if sf_hzperppm else 0.0
             ns  = fid.size
-            te  = float(data.get('echotime', 0.0))   # ms
-            header_info = {'sw': sw, 'sf': sf, 'ns': ns, 'te': te}
+            # te  = float(data.get('echotime'))   # ms
+            b0 = float(data['seq']['B0'])
+            lw = float(data['seq']['Rx_LW'])
+            header_info = {'sw': sw, 'sf': sf, 'ns': ns, 'te': te, 'B0': b0, 'centerFreq': float(data['seq']['centralShift']), 'lw': lw}
 
     if not metabolites:
         raise ValueError(
