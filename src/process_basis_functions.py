@@ -10,82 +10,8 @@ import matplotlib.pyplot as plt
 
 from collections import OrderedDict
 
-# from .aux import loadmat_as_dict, reorder_metabolite_struct
+from .aux import loadmat_as_dict, reorder_metabolite_struct
 
-
-# # Imports
-def reorder_metabolite_struct(S):
-    """
-    Recursively reorder a MATLAB-like struct (Python dict).
-
-    Order:
-    1. Alphabetical (non-MM, non-Lip)
-    2. MM* sorted numerically by suffix
-    3. Lip* sorted numerically by suffix
-    """
-
-    # --- Base cases ---
-    if isinstance(S, list):
-        return [reorder_metabolite_struct(x) for x in S]
-
-    if not isinstance(S, dict):
-        return S
-
-    fn = list(S.keys())
-    fn_lower = [f.lower() for f in fn]
-
-    is_mm  = [f.startswith('mm') for f in fn_lower]
-    is_lip = [f.startswith('lip') for f in fn_lower]
-    is_other = [not (mm or lip) for mm, lip in zip(is_mm, is_lip)]
-
-    # --- Split groups ---
-    other_fields = sorted([f for f, keep in zip(fn, is_other) if keep])
-    mm_fields    = sort_special_fields([f for f, keep in zip(fn, is_mm) if keep], 'mm')
-    lip_fields   = sort_special_fields([f for f, keep in zip(fn, is_lip) if keep], 'lip')
-
-    new_order = other_fields + mm_fields + lip_fields
-
-    # --- Rebuild ordered dict ---
-    S_ordered = {}
-    for f in new_order:
-        val = S[f]
-        if isinstance(val, (dict, list)):
-            val = reorder_metabolite_struct(val)
-        S_ordered[f] = val
-
-    return S_ordered
-
-
-def sort_special_fields(fields, prefix):
-    """
-    Sort fields like:
-        MM09, MM092, MM12, MM121
-
-    Correctly distinguishes:
-        MM09 ≠ MM092  (no prefix confusion)
-
-    Sorting rule:
-        1. numeric suffix (09 -> 9, 092 -> 92)
-        2. then full string (stable tie-breaker)
-    """
-
-    if not fields:
-        return fields
-
-    prefix = prefix.lower()
-
-    def extract_number(name):
-        # strict match: prefix + digits ONLY at start
-        match = re.match(rf'^{prefix}(\d+)$', name, re.IGNORECASE)
-        if match:
-            return int(match.group(1))
-        return float('inf')  # non-matching go last
-
-    # sort by numeric value, then by full string to avoid ambiguity
-    return sorted(fields, key=lambda x: (extract_number(x), x))
-
-
-# # Back to the code
 
 # # Gyromagnetic Ratios for common nuclei
 gamma_nucleus = {
@@ -733,6 +659,13 @@ def assign_fid(metabolites, name: str, fid: np.ndarray):
         }})
         # print(f"  [skip] '{name}' not found in template metabolites")
 
+def mrscloud_correction(metabolites):
+    for k in metabolites.keys():
+        tmp = np.fliplr(np.fft.fftshift(metabolites[k]['fid'], axes=1))
+        tmp = tmp[:,0,:] + 1j*tmp[:,1,:]
+        tmp = np.fft.ifft(np.fft.ifftshift(tmp, axes=-1), axis=-1)
+        metabolites[k]['fid'] = fit_to_stack(tmp)
+    return metabolites
 
 # def calc_dt(fid: np.ndarray) -> float:
 #     a = np.diff(fid)
@@ -823,6 +756,8 @@ def main(config: dict):
                 header_set = True
             for name, fid in mets.items():
                 assign_fid(metabolites, name, fid)
+            if config['MRSCloud']:
+                metabolites = mrscloud_correction(metabolites)
 
         # -- LCModel .raw (single metabolite per file) ------------------------
         elif ext == '.raw':
@@ -877,33 +812,33 @@ def main(config: dict):
         else:
             print(f"  [skip] Unsupported extension '{ext}'")
 
-    # -- Edited spectra (OFF condition) --------------------------------------
-    if config.get('edit_off_path'):
-        for met in config.get('metabs_off', []):
-            loaded = False
+    # # -- Edited spectra (OFF condition) --------------------------------------
+    # if config.get('edit_off_path'):
+    #     for met in config.get('metabs_off', []):
+    #         loaded = False
 
-            # Try each format in order of likelihood
-            candidates = [
-                (met + '.mat',   lambda p: np.squeeze(
-                    io.loadmat(p)['exptDat']['fid']).astype(complex)),
-                (met + '.raw',   lambda p: load_raw_basis(p)[1]),
-                (met + '.basis', lambda p: list(
-                    load_lcmodel_basis(p)[1].values())[0]),
-            ]
-            for fname, loader in candidates:
-                candidate = os.path.join(config['edit_off_path'], fname)
-                if os.path.isfile(candidate):
-                    try:
-                        fid = loader(candidate)
-                        metabolites[met.lower()]['fid_OFF'] = fid_to_stack(fid)
-                        loaded = True
-                        break
-                    except Exception as e:
-                        print(f"  [warn] Could not load OFF file "
-                              f"{candidate}: {e}")
+    #         # Try each format in order of likelihood
+    #         candidates = [
+    #             (met + '.mat',   lambda p: np.squeeze(
+    #                 io.loadmat(p)['exptDat']['fid']).astype(complex)),
+    #             (met + '.raw',   lambda p: load_raw_basis(p)[1]),
+    #             (met + '.basis', lambda p: list(
+    #                 load_lcmodel_basis(p)[1].values())[0]),
+    #         ]
+    #         for fname, loader in candidates:
+    #             candidate = os.path.join(config['edit_off_path'], fname)
+    #             if os.path.isfile(candidate):
+    #                 try:
+    #                     fid = loader(candidate)
+    #                     metabolites[met.lower()]['fid_OFF'] = fid_to_stack(fid)
+    #                     loaded = True
+    #                     break
+    #                 except Exception as e:
+    #                     print(f"  [warn] Could not load OFF file "
+    #                           f"{candidate}: {e}")
 
-            if not loaded:
-                print(f"  [warn] No OFF-condition file found for '{met}'")
+    #         if not loaded:
+    #             print(f"  [warn] No OFF-condition file found for '{met}'")
 
 
     # -- Visual Inspection ---------------------------------------------------
@@ -1022,6 +957,7 @@ if __name__ == '__main__':
     parser.add_argument('--TE', type=float, default=30)
     parser.add_argument('--B0', type=float, default=3)
     parser.add_argument('--dt', type=float, default=0.00025)
+    parser.add_argument('--MRSCloud', action='store_true', default=False, help='Accounts for MRSCloud exporting basis sets in the spectral domain.')
     parser.add_argument('--debug', action='store_true', default=False)
     # parser.add_argument('--carrier_frequency', type=float, default=127.7)
     args = parser.parse_args()
