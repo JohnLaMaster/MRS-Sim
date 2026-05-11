@@ -3,6 +3,7 @@ import copy
 import json
 import os
 import sys
+import glob
 from collections import OrderedDict
 
 import matplotlib.pyplot.close as plt_close
@@ -12,37 +13,54 @@ import scipy.io.loadmat as ioloadmat
 from fitter import Fitter as Fitter
 from fitter import get_common_distributions, get_distributions
 
-from types import Callable, GeneratorType, Tuple
+from types import Callable, GeneratorType, Tuple, Optional
 
 
 sys.path.append('../')
 
 
-def loadParams(parameters_path: str, ) -> Tuple:
+def loadParams(parameters_path: Optional[str, list], ) -> Tuple:
     '''
     Load the osp_esportParams mat file. 
     If multiple paths are specified, concatenate the data along
-    the batch size, dim=0.
+    the batch size, dim=0, yielding shape [batchSize, num_params].
+    Expects each file's arrays to be stored column-wise: [num_params, n_subjects].
     '''
-    paths = parameters_path.split(',')
+    if isinstance(parameters_path, str):
+        paths = parameters_path.split(',')
+        
     params = None
-    sample_size = None
+
     for path in paths:
         with open(path, 'rb') as file:
             temp = ioloadmat(file, struct_as_record=True)
-            temp.pop('__globals__')
-            temp.pop('__header__')
-            temp.pop('__version__')
-            try: temp.pop('header')
-            except Exception: pass
-        if isinstance(params, type(None)):
+        for key in ['__globals__', '__header__', '__version__', 'ECC', 'J', 'beta_j', 'lineShape']:
+            temp.pop(key, None)
+            
+        names = temp['header'].names
+        temp.popt('header', None)
+
+        # Validate column-wise storage and transpose to [n_subjects, num_params]
+        for k, v in temp.items():
+            assert v.ndim == 2, (
+                f"Expected 2D array for key '{k}' in {path}, got shape {v.shape}. "
+                f"Data must be stored column-wise: [num_params, n_subjects]."
+            )
+            temp[k] = v.T  # [num_params, n_subjects] -> [n_subjects, num_params]
+
+        if params is None:
             params = copy.copy(temp)
         else:
             for k, v in temp.items():
-                params[k] = np.concatenate(params[k], v, axis=0)
-                if not sample_size: sample_size = params[k].shape[0]
+                assert params[k].shape[1] == v.shape[1], (
+                    f"Mismatch in num_params for key '{k}': "
+                    f"{params[k].shape[1]} vs {v.shape[1]}."
+                )
+                params[k] = np.concatenate([params[k], v], axis=0)
 
-    return params, sample_size
+    sample_size = next(iter(params.values())).shape[0]
+    
+    return params, sample_size, names
 
 
 def findDistribution(v: np.ndarray,
@@ -64,11 +82,12 @@ def findDistribution(v: np.ndarray,
 
 def main(args):
     # Load the parameters to find their distributions
-    params, sample_size = loadParams(args.paramPath)
+    params, sample_size, names = loadParams(args.paramPath)
     args.nx = 1 if args.n==-1 else args.nx
     args.n = sample_size if args.n==-1 else int(args.n*sample_size)
     ind = np.zeros(sample_size, dtype='bool')
     ind[0:args.n] = True
+    num_res = params['ampl'].shape[-1]
     
     if not args.paramKeys:
         args.paramKeys = params.keys()
@@ -92,24 +111,50 @@ def main(args):
         for k, v in params.items():
             # Check if the parameter name was selected for analysis
             if k in args.paramKeys:
-                for i, f in enumerate(findDistribution(v=v, ind=ind, args=args)):
-                    # Identify the top-k best fitting distributions
-                    distributions.update({'{}_{}'.format(k,i): 
-                                        f.summary(Nbest=args.Nbest, method=args.selectionMetric).to_dict()})
-                    with open(savedir + 'summary_of_{}_best_fits.json'.format(args.Nbest), 'w') as file:
+                num_vars = v.shape[1]
+                if k in 'ampl': k = '{}_ampl'.format(k)
+                if k in 'lorentzLB': k = '{}_lorentzLB'.format(k)
+                if k in 'freqShift': k = '{}_freqShift'.format(k)
+                for j in range(num_vars):
+                    for i, f in enumerate(findDistribution(v=v[...,:j], ind=ind, args=args)):
+                        # Identify the top-k best fitting distributions
+                        distributions.update({'{}_{}'.format(k,i): 
+                                            f.summary(Nbest=args.Nbest, method=args.selectionMetric).to_dict()})
+                        
+                        # Save the best fitting distribution and its parameters
+                        best.update({'{}_{}'.format(k,i): f.get_best()})
+                        
+                        # Save the top-k best fitting distribution plots
+                        plt_savefig(savedir + '{}_{}.png'.format(k,i), dpi=140)
+                        plt_savefig(savedir + '{}_{}.eps'.format(k,i), dpi=140)
+                        plt_close()
+                        
+                        # with open(savedir + 'summary_of_{}_best_fits.json'.format(args.Nbest), 'w') as file:
+                        #     json.dump(distributions, file, indent=4, separators=(',', ': '))
+
+                        # with open(savedir + 'best_fit.json', 'w') as file:
+                        #     json.dump(best, file, indent=4, separators=(',', ': '))
+                        
+                    # Append-by-merge: load existing content, update, and write back
+                    summary_path = savedir + 'summary_of_{}_best_fits.json'.format(args.Nbest)
+                    if os.path.isfile(summary_path):
+                        with open(summary_path, 'r') as file:
+                            existing = json.load(file)
+                        existing.update(distributions)
+                        distributions = existing
+                    with open(summary_path, 'w') as file:
                         json.dump(distributions, file, indent=4, separators=(',', ': '))
 
-                    # Save the best fitting distribution and its parameters
-                    best.update({'{}_{}'.format(k,i): f.get_best()})
-                    with open(savedir + 'best_fit.json', 'w') as file:
+                    best_path = savedir + 'parameter_distributions_best_fit.json'
+                    if os.path.isfile(best_path):
+                        with open(best_path, 'r') as file:
+                            existing = json.load(file)
+                        existing.update(best)
+                        best = existing
+                    with open(best_path, 'w') as file:
                         json.dump(best, file, indent=4, separators=(',', ': '))
 
-                    # Save the top-k best fitting distribution plots
-                    plt_savefig(savedir + '{}_{}.png'.format(k,i), dpi=140)
-                    plt_savefig(savedir + '{}_{}.eps'.format(k,i), dpi=140)
-                    plt_close()
-
-    print('Saved fitting parameter distributions at: {}'.format(args.savedir + 'parameter_distributions.json'))
+    print('Saved fitting parameter distributions at: {}'.format(args.savedir + 'parameter_distributions_best_fit.json'))
 
 
 if __name__=='__main__':
@@ -135,14 +180,18 @@ if __name__=='__main__':
     # Specifying a single file
     if os.path.isfile(args.paramPath):
         assert os.path.splitext(args.paramPath)[-1].lower() in ['.mat']
+        args.paramPath = [args.paramPath]
+    elif os.path.isdir(args.paramPath):
+        args.paramPath = sorted(glob.glob(os.path.join(args.paramPath, '*fitting_parameters*.mat')))
+        assert len(args.paramPath) > 0, f"No '*fitting_parameters*.mat' files found in: {args.paramPath}"
 
     # Specifying a list of files
     if isinstance(args.paramPath, str):
         args.paramPath = [path for path in args.paramPath.split(',')]
 
     # Specifying a directory of files
-    if os.isdir(args.paramPath):
-        args.paramPath = [path for path in os.listdir(args.paramPath) if os.path.splitext(path)[-1].lower() in ['.mat']]
+    # if os.isdir(args.paramPath):
+    #     args.paramPath = [path for path in os.listdir(args.paramPath) if os.path.splitext(path)[-1].lower() in ['.mat']]
     
     # Limit analysis to specific distributions
     if args.distributions:
