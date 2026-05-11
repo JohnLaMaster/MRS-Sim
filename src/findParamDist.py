@@ -84,10 +84,15 @@ def main(args):
     # Load the parameters to find their distributions
     params, sample_size, names = loadParams(args.paramPath)
     args.nx = 1 if args.n==-1 else args.nx
-    args.n = sample_size if args.n==-1 else int(args.n*sample_size)
+    if args.n==-1:
+        args.n = sample_size 
+    else: 
+        assert isinstance(args.n, [float, int]), "--n must be a float or int but got type {}".format(type(args.n))
+        if isinstance(args.n, int): assert args.n==1, "If --n is an integer, it must be equal to 1"
+        elif isinstance(args.n, float): assert ((args.n>0) & (args.n<1)), "if --n is a float, it must be between (0,1)"
+        args.n = int(args.n*sample_size)
     ind = np.zeros(sample_size, dtype='bool')
     ind[0:args.n] = True
-    num_res = params['ampl'].shape[-1]
     
     if not args.paramKeys:
         args.paramKeys = params.keys()
