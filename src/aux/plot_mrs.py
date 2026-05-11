@@ -32,14 +32,17 @@ Requirements
     pip install numpy scipy matplotlib h5py
 """
 
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import MultipleLocator
 import scipy.io
 import h5py
+import argparse
 
 from collections import OrderedDict
+from types import Optional
 
 # ══════════════════════════════════════════════════════════════
 #  USER SETTINGS
@@ -192,151 +195,186 @@ def _pad_ylim(ax, frac=0.15):
 # ──────────────────────────────────────────────────────────────
 
 def main():
-    idx = SPECTRUM_IDX
+    # idx = SPECTRUM_IDX
 
     # ── 1. Load simulation data ───────────────────────────────
     mat, loader = load_mat(MAT_FILE)
-
-    ppm       = np.asarray(mat["ppm"]).squeeze()
-    spec      = to_complex(np.asarray(mat["spectra"]))[idx,:,:]
-    bl_real   = to_complex(np.asarray(mat["baselines"]))[idx,:].real
-    rw_real   = to_complex(np.asarray(mat["residual_water"]))[idx,:].real
     
-    spec_real = np.fft.fftshift(np.fft.fft(spec),axes=-1).real[0,:]
-    denom = np.amax(spec_real)
-    spec_real = spec_real / denom
-    bl_real   = bl_real / denom
-    rw_real   = rw_real / denom
-
-    # Amplitudes are stored per-metabolite as params.<key>, each shape [1, batch].
-    # Stack them in MET_KEYS order to get a [N_met] vector for this index.
-    if loader == "scipy":
-        p = mat["params"]
-        a_vec = np.array([np.atleast_1d(getattr(p, key)).squeeze()[idx]
-                        for key in MET_KEYS])
-        d_vec = np.asarray(p.d)[idx]
-        g_vec = np.asarray(p.g)[idx]
-    else:
-        p = mat["params"]
-        try:
-            a_vec = np.array([np.asarray(p[key]).squeeze()[idx]
-                            for key in MET_KEYS])
-            d_vec = np.asarray(p["d"])[idx]
-            g_vec = np.asarray(p["g"])[idx]
-        except AttributeError:
-            print("AttributeError with alternate loader")
-            pass
-
-    # ── 2. Load basis FIDs + time vector ─────────────────────
-    #    header.t is stored in the BASIS file, not the simulation file
-    basis_fids, t = load_basis(BASIS_FILE)
-
-    # ── 3. Build per-metabolite spectra ──────────────────────
-    met_spectra = []
-    for i, key in enumerate(MET_KEYS):
-        fid_b = apply_broadening(basis_fids[key], d_vec[i], g_vec[i], t)
-        fid_b = fid_to_spectrum(fid_b)
-        met_spectra.append(fid_b * a_vec[i])
-    met_spectra = np.fliplr(np.array(met_spectra))   # [N_met, N_pts]
-    
-    met_spectra = met_spectra / np.amax(met_spectra) * np.amax(spec_real)
-
-    # ── 4. Reconstructed fit ──────────────────────────────────
-    fit_real = (met_spectra.sum(axis=0) + bl_real) 
-    fit_real = fit_real / np.amax(fit_real) * np.amax(spec_real)
-
-    # ── 5. Figure layout ──────────────────────────────────────
-    ppm_hi, ppm_lo = PPM_RANGE
-    n_rows         = 1 + N_MET #+ 1
-    height_ratios  = [TOP_RATIO] + [1] * N_MET #+ [1]
-    total_h        = FIG_WIDTH * (sum(height_ratios) / (TOP_RATIO + 1)) * 0.55#+ 2)) * 0.55
-
-    fig, ax = plt.subplots(figsize=(FIG_WIDTH*1.2, FIG_WIDTH))
-
-    # ── Define vertical offset ───────────────────────────────────
-    spec_range = np.max(spec_real) - np.min(spec_real)
-    OFFSET_STEP = 1.0 * spec_range   # 10% of spec_real height
-
-    # Keep track of current vertical level (top → bottom)
-    offset = 0.0
-    rx = 7.5*1.25
-    print('spec_range: ',spec_range, np.amax(spec_real*rx+offset))
-
-    # ── 6. Top spectrum (data + model components) ────────────────
-    # ax.axvline(x=0, color="silver", lw=2.8, zorder=0)
-    ax.plot(ppm, spec_real*rx + offset, color="black", lw=0.9, label="data", zorder=2)
-
-    if SHOW_FIT:
-        ax.plot(ppm, fit_real*rx + offset, color="red", lw=0.9, label="fit", zorder=3)
-
-    ax.plot(ppm, bl_real*rx + offset, color="royalblue", lw=0.9,
-            label="baseline", zorder=3)
-
-    # Legend only once
-    ax.legend(loc="upper right", fontsize=LEGEND_FS, frameon=False, handlelength=1.2)
-
-    # Move down for next traces
-    offset -= OFFSET_STEP
-    rx /= 1.25
-    rx1 = rx
-    mm = 0
-
-    # ── 7. Metabolite spectra (stacked with offsets) ─────────────
-    for lbl, sp in zip(MET_LABELS, met_spectra):
-        ax.plot(ppm, sp*rx1 + offset, color="black", lw=0.6)
-
-        # Label on the right
-        ax.annotate(lbl,
-                    xy=(1.01, offset),
-                    xycoords=("axes fraction", "data"),
-                    fontsize=ANNOT_FS, va="center", ha="left")
-
-        offset -= OFFSET_STEP
-        if lbl.lower().startswith("mm"): mm += sp*rx1
+    for idx in SPECTRUM_IDX:
+        ppm       = np.asarray(mat["ppm"]).squeeze()
+        spec      = to_complex(np.asarray(mat["spectra"]))[idx,:,:]
+        bl_real   = to_complex(np.asarray(mat["baselines"]))[idx,:].real
+        rw_real   = to_complex(np.asarray(mat["residual_water"]))[idx,:].real
         
-    ax.plot(ppm, mm + offset, color='black', lw=0.6)
-    ax.annotate("MM Sum", xy=(1.01, offset), xycoords=("axes fraction", "data"),
-                  fontsize=ANNOT_FS, va="center", ha="left")
-    offset -= OFFSET_STEP
-    
-    # ── 8. Residual water panel ───────────────────────────────
-    # residual = spec_real - bl_real - fit_real
-    ax.plot(ppm, rw_real*rx + offset, color="black", lw=0.6)
-    ax.annotate("Res H\u2082O", xy=(1.01, offset), xycoords=("axes fraction", "data"),
-                  fontsize=ANNOT_FS, va="center", ha="left")
-    offset -= OFFSET_STEP
+        spec_real = np.fft.fftshift(np.fft.fft(spec),axes=-1).real[0,:]
+        denom = np.amax(spec_real)
+        spec_real = spec_real / denom
+        bl_real   = bl_real / denom
+        rw_real   = rw_real / denom
 
-    # ── 8. Axis formatting ───────────────────────────────────────
-    ax.set_xlim(ppm_lo, ppm_hi)
-    ax.invert_xaxis()
+        # Amplitudes are stored per-metabolite as params.<key>, each shape [1, batch].
+        # Stack them in MET_KEYS order to get a [N_met] vector for this index.
+        if loader == "scipy":
+            p = mat["params"]
+            a_vec = np.array([np.atleast_1d(getattr(p, key)).squeeze()[idx]
+                            for key in MET_KEYS])
+            d_vec = np.asarray(p.d)[idx]
+            g_vec = np.asarray(p.g)[idx]
+        else:
+            p = mat["params"]
+            try:
+                a_vec = np.array([np.asarray(p[key]).squeeze()[idx]
+                                for key in MET_KEYS])
+                d_vec = np.asarray(p["d"])[idx]
+                g_vec = np.asarray(p["g"])[idx]
+            except AttributeError:
+                print("AttributeError with alternate loader")
+                pass
 
-    # X-axis ticks only (bottom, as requested)
-    ax.xaxis.set_major_locator(MultipleLocator(0.5))
-    ax.xaxis.set_minor_locator(MultipleLocator(0.1))
-    ax.tick_params(which="major", length=4, labelsize=TICK_FS)
-    ax.tick_params(which="minor", length=2)
+        # ── 2. Load basis FIDs + time vector ─────────────────────
+        #    header.t is stored in the BASIS file, not the simulation file
+        basis_fids, t = load_basis(BASIS_FILE)
 
-    ax.set_xlabel("Chemical Shift (ppm)", fontsize=LABEL_FS)
+        # ── 3. Build per-metabolite spectra ──────────────────────
+        met_spectra = []
+        for i, key in enumerate(MET_KEYS):
+            fid_b = apply_broadening(basis_fids[key], d_vec[i], g_vec[i], t)
+            fid_b = fid_to_spectrum(fid_b)
+            met_spectra.append(fid_b * a_vec[i])
+        met_spectra = np.fliplr(np.array(met_spectra))   # [N_met, N_pts]
+        
+        met_spectra = met_spectra / np.amax(met_spectra) * np.amax(spec_real)
 
-    # Clean up y-axis (since offsets make absolute values less meaningful)
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+        # ── 4. Reconstructed fit ──────────────────────────────────
+        fit_real = (met_spectra.sum(axis=0) + bl_real) 
+        fit_real = fit_real / np.amax(fit_real) * np.amax(spec_real)
 
-    # Optional: tighten vertical limits to content
-    all_data = [spec_real] + list(met_spectra)
-    y_min = min(np.min(d*.05) for d in all_data) - OFFSET_STEP * (len(all_data)+1)
-    y_min = min(np.min(d) for d in all_data) - OFFSET_STEP * (len(all_data)+2)#1)
-    y_max = np.max(spec_real)*rx*1.25 + OFFSET_STEP
-    ax.set_ylim(y_min, y_max)
-    print("ymin: {}, ymax: {}".format(y_min,y_max))
-    
-    # ── 9. Save / show ────────────────────────────────────────
-    if SAVE_PATH:
-        fig.savefig(SAVE_PATH, dpi=300, bbox_inches="tight")
-        print(f"Saved → {SAVE_PATH}")
-    plt.show()
+        # ── 5. Figure layout ──────────────────────────────────────
+        ppm_hi, ppm_lo = PPM_RANGE
+        n_rows         = 1 + N_MET #+ 1
+        height_ratios  = [TOP_RATIO] + [1] * N_MET #+ [1]
+        total_h        = FIG_WIDTH * (sum(height_ratios) / (TOP_RATIO + 1)) * 0.55#+ 2)) * 0.55
+
+        fig, ax = plt.subplots(figsize=(FIG_WIDTH*1.2, FIG_WIDTH))
+
+        # ── Define vertical offset ───────────────────────────────────
+        spec_range = np.max(spec_real) - np.min(spec_real)
+        OFFSET_STEP = 1.0 * spec_range   # 10% of spec_real height
+
+        # Keep track of current vertical level (top → bottom)
+        offset = 0.0
+        rx = 7.5*1.25
+        print('spec_range: ',spec_range, np.amax(spec_real*rx+offset))
+
+        # ── 6. Top spectrum (data + model components) ────────────────
+        # ax.axvline(x=0, color="silver", lw=2.8, zorder=0)
+        ax.plot(ppm, spec_real*rx + offset, color="black", lw=0.9, label="data", zorder=2)
+
+        if SHOW_FIT:
+            ax.plot(ppm, fit_real*rx + offset, color="red", lw=0.9, label="fit", zorder=3)
+
+        ax.plot(ppm, bl_real*rx + offset, color="royalblue", lw=0.9,
+                label="baseline", zorder=3)
+
+        # Legend only once
+        ax.legend(loc="upper right", fontsize=LEGEND_FS, frameon=False, handlelength=1.2)
+
+        # Move down for next traces
+        offset -= OFFSET_STEP
+        rx /= 1.25
+        rx1 = rx
+        mm = 0
+
+        # ── 7. Metabolite spectra (stacked with offsets) ─────────────
+        for lbl, sp in zip(MET_LABELS, met_spectra):
+            ax.plot(ppm, sp*rx1 + offset, color="black", lw=0.6)
+
+            # Label on the right
+            ax.annotate(lbl,
+                        xy=(1.01, offset),
+                        xycoords=("axes fraction", "data"),
+                        fontsize=ANNOT_FS, va="center", ha="left")
+
+            offset -= OFFSET_STEP
+            if lbl.lower().startswith("mm"): mm += sp*rx1
+            
+        ax.plot(ppm, mm + offset, color='black', lw=0.6)
+        ax.annotate("MM Sum", xy=(1.01, offset), xycoords=("axes fraction", "data"),
+                    fontsize=ANNOT_FS, va="center", ha="left")
+        offset -= OFFSET_STEP
+        
+        # ── 8. Residual water panel ───────────────────────────────
+        # residual = spec_real - bl_real - fit_real
+        ax.plot(ppm, rw_real*rx + offset, color="black", lw=0.6)
+        ax.annotate("Res H\u2082O", xy=(1.01, offset), xycoords=("axes fraction", "data"),
+                    fontsize=ANNOT_FS, va="center", ha="left")
+        offset -= OFFSET_STEP
+
+        # ── 8. Axis formatting ───────────────────────────────────────
+        ax.set_xlim(ppm_lo, ppm_hi)
+        ax.invert_xaxis()
+
+        # X-axis ticks only (bottom, as requested)
+        ax.xaxis.set_major_locator(MultipleLocator(0.5))
+        ax.xaxis.set_minor_locator(MultipleLocator(0.1))
+        ax.tick_params(which="major", length=4, labelsize=TICK_FS)
+        ax.tick_params(which="minor", length=2)
+
+        ax.set_xlabel("Chemical Shift (ppm)", fontsize=LABEL_FS)
+
+        # Clean up y-axis (since offsets make absolute values less meaningful)
+        ax.set_yticks([])
+        ax.spines["left"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        # Optional: tighten vertical limits to content
+        all_data = [spec_real] + list(met_spectra)
+        y_min = min(np.min(d*.05) for d in all_data) - OFFSET_STEP * (len(all_data)+1)
+        y_min = min(np.min(d) for d in all_data) - OFFSET_STEP * (len(all_data)+2)#1)
+        y_max = np.max(spec_real)*rx*1.25 + OFFSET_STEP
+        ax.set_ylim(y_min, y_max)
+        print("ymin: {}, ymax: {}".format(y_min,y_max))
+        
+        # ── 9. Save / show ────────────────────────────────────────
+        if SAVE_PATH:
+            fig.savefig(SAVE_PATH, dpi=300, bbox_inches="tight")
+            print(f"Saved → {SAVE_PATH}")
+        plt.show()
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data', type=str, default=None, help='Path to .mat file of exported MRS-Sim simulations.')
+    parser.add_argument('--basis_set', type=str, default=None, help='Path to MRS-Sim basis set used for the simulations.')
+    parser.add_argument('--savedir', type=str, default=None, help='Directory for saving the plotted figures.') # set None to skip saving
+    parser.add_argument('--ind', type=int, default=None, help='Integer index or str of ","-separated indices for which spectra to plot.')
+    parser.add_argument('--ppm', type=str,default=None, help='PPM range for the plotted data.')
+    parser.add_argument('--show_fit', action='store_true', default=False, help='Display the clean "fit" on top of the plotted simulation(s).')
+    parser.add_argument('--met_labels', type=str, default=None, help='String with ","-separable metabolite labels listing what should be included in the plots.')
+    
+    args = parser.parse_args()
+
+    # Check arguments
+    if args.data:       assert os.path.isfile(args.data),       "Data file {} is not a file or does not exist".format(args.data)
+    if args.basis_set:  assert os.path.isfile(args.basis_set),  "Basis set file {} is not a file or does not exist".format(args.data)
+    if args.savedir:    os.makedirs(args.savedir, exist_ok=True)
+    if args.ind:
+        if isinstance(args.ind, int): 
+            args.ind = [args.ind]
+        elif isinstance(args.ind, str): 
+            args.ind = [int(x) for x in args.ind.split(',')]
+    if args.ppm:        
+        args.ppm = [float(x) for x in args.ppm.split(',')]
+        if args.ppm[0]<args.ppm[1]: args.ppm.reverse()
+    
+    MAT_FILE     = args.data                  if args.data       else MAT_FILE
+    BASIS_FILE   = args.basis_set             if args.basis_set  else BASIS_FILE
+    SAVE_PATH    = args.savedir               if args.savedir    else SAVE_PATH
+    SPECTRUM_IDX = args.ind                   if args.ind        else SPECTRUM_IDX         # batch index (0-based)
+    PPM_RANGE    = args.ppm                   if args.ppm        else PPM_RANGE            # (high_ppm, low_ppm)
+    SHOW_FIT     = args.show_fit              if args.show_fit   else SHOW_FIT
+    MET_LABELS   = args.met_labels.split(',') if args.met_labels else MET_LABELS
+    MET_KEYS     = [l.lower() for l in MET_LABELS]
+    N_MET        = len(MET_KEYS)
+
     main()
