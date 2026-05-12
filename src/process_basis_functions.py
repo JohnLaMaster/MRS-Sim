@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 from collections import OrderedDict
 
-from .aux import loadmat_as_dict, reorder_metabolite_struct
+from .aux import loadmat_as_dict, reorder_metabolite_struct, npfftshift, npifftshift
 
 
 # # Gyromagnetic Ratios for common nuclei
@@ -666,9 +666,9 @@ def assign_fid(metabolites, name: str, fid: np.ndarray):
 
 def mrscloud_correction(metabolites):
     for k in metabolites.keys():
-        tmp = np.fliplr(np.fft.fftshift(metabolites[k]['fid'], axes=1))
+        tmp = np.fliplr(npfftshift(metabolites[k]['fid'], axis=1))
         tmp = tmp[:,0,:] + 1j*tmp[:,1,:]
-        tmp = np.fft.ifft(np.fft.ifftshift(tmp, axes=-1), axis=-1)
+        tmp = np.fft.ifft(npifftshift(tmp, axes=-1), axis=-1)
         metabolites[k]['fid'] = fit_to_stack(tmp)
     return metabolites
 
@@ -912,10 +912,10 @@ def visual_inspection(metabolites, ppm, flip=False, debug=False):
 
     # --- FFT ---
     if not debug:
-        spec = np.fft.fftshift(np.fft.fft(fid, axis=1), axes=1)
+        spec = npfftshift(np.fft.fft(fid, axis=1), axs=1)
         if flip: spec = np.fliplr(spec)
     else:
-         spec = np.fliplr(np.fft.fftshift(fid, axes=1))
+         spec = np.fliplr(npfftshift(fid, axis=1))
 
     # =========================================================
     # Plot 1 (uses ppm directly)
