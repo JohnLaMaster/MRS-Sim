@@ -19,7 +19,7 @@ __all__ = ['batch_linspace', 'batch_smooth', 'complex_exp', 'concat_dict',
            'HilbertTransform', 'inv_Fourier_Transform', 'normalize', 
            'OrderOfMagnitude', 'rand_omit', 'sample_baselines', 
            'sample_resWater', 'sim2acquired', 'sort_parameters', 
-           'torch2numpy', 'unwrap', 'normalize_old']
+           'torch2numpy', 'unwrap', 'normalize_old', '_fftshift', '_ifftshift']
 
 
 PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
