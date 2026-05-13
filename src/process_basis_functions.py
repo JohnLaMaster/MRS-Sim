@@ -885,6 +885,522 @@ def main(config: dict):
                       })
     print(f"\nSaved basis set '{save_name}' to: {save_dir}")
 
+    # -- Export to additional formats ----------------------------------------
+    export_formats = config.get('export_formats', [])
+    if isinstance(export_formats, str):
+        export_formats = [f.strip() for f in export_formats.split(',') if f.strip()]
+
+    if export_formats:
+        # Derive a clean base name (strip .mat if present) for single-file exports
+        export_base = os.path.splitext(save_name)[0]
+        export_root = os.path.join(save_dir, 'exported', export_base)
+
+        print(f"\nExporting to {len(export_formats)} additional format(s):")
+        for fmt in export_formats:
+            fmt = fmt.strip()
+            if fmt not in EXPORT_FORMATS:
+                print(f"  [warn] Unknown export format '{fmt}'; skipping. "
+                      f"Valid options: {', '.join(EXPORT_FORMATS)}")
+                continue
+
+            print(f"  → {fmt}")
+            exported_paths = export_basis_set(
+                metabolites=metabolites,
+                header=header,
+                config=config,
+                export_format=fmt,
+                output_dir=export_root,
+                base_name=export_base,
+            )
+
+            # Early validation on the first output of multi-file formats.
+            # If the first written file fails structural validation we abort
+            # the rest of the export immediately so that a systematic error is
+            # caught before writing hundreds of files.
+            if len(exported_paths) > 1 and exported_paths:
+                first = exported_paths[0]
+                try:
+                    from validate_basis_sets import validate_single_file
+                    ok, msg = validate_single_file(first, fmt)
+                    if not ok:
+                        print(f"\n  [ERROR] Early validation FAILED on first "
+                              f"exported file: {first}")
+                        print(f"  Reason: {msg}")
+                        print(f"  Aborting export of remaining files in '{fmt}'.")
+                        for p in exported_paths:
+                            if os.path.isfile(p):
+                                os.remove(p)
+                        continue
+                except ImportError:
+                    pass   # Validator not yet installed; skip early check
+
+
+# =============================================================================
+# Export helpers and format-specific writers
+# =============================================================================
+
+#: All supported export format identifiers.
+EXPORT_FORMATS = [
+    'lcmodel_raw',    # One .raw file per metabolite (no sequence params embedded)
+    'lcmodel_basis',  # Single multi-metabolite .basis file
+    'fsl_mrs_json',   # One .json file per metabolite (FSL-MRS directory layout)
+    'osprey_mat',     # Single .mat with BASIS struct (Osprey convention)
+    'marss_native',   # One .mat per metabolite with exptDat struct (MARSS native)
+    'nifti_mrs',      # Single .nii with shape (1,1,1,ns,n_mets) and ecode-44 JSON
+]
+
+
+def _alert(fmt: str, msg: str):
+    """Print a clearly labelled terminal alert for missing or defaulted export info."""
+    print(f"\n  [ALERT] [{fmt}] {msg}")
+
+
+def _extract_complex_fid(met_dict: dict) -> np.ndarray:
+    """
+    Extract a 1-D complex FID from the internal (1, 2, N) real/imag stack
+    produced by fid_to_stack().
+
+    Handles both the canonical (1, 2, N) shape and the legacy (2, N) shape,
+    as well as arrays that are already complex.
+    """
+    fid_data = np.squeeze(met_dict['fid'])       # → (2, N) or (N,)
+    if fid_data.ndim == 2 and fid_data.shape[0] == 2:
+        return fid_data[0].astype(complex) + 1j * fid_data[1].astype(complex)
+    if np.iscomplexobj(fid_data):
+        return fid_data.flatten()
+    raise ValueError(
+        f"Unexpected FID shape {fid_data.shape}; cannot extract complex data."
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LCModel .raw  (one file per metabolite)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def export_lcmodel_raw(metabolites: dict, header: dict, output_dir: str,
+                       config: dict) -> list:
+    """
+    Write each metabolite as a separate LCModel .raw file.
+
+    .raw files carry no sequence parameters; these must be supplied externally
+    (via a companion .basis file or config) when re-importing into LCModel.
+    TRAMP, VOLUME, and CONC are set to 1.0 (unscaled simulation amplitude).
+
+    Parameters
+    ----------
+    metabolites : Internal metabolites dict {name: {'fid': (1,2,N), ...}}.
+    header      : Internal header dict.
+    output_dir  : Directory in which to write the .raw files.
+    config      : Full config dict.
+
+    Returns
+    -------
+    list of str : Paths to the written files, in metabolite order.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    paths = []
+
+    _alert('lcmodel_raw',
+           'Sequence parameters (sw, sf) are NOT embedded in .raw files. '
+           'Supply these via a companion .basis file or the config '
+           'spectralwidth / carrier_frequency keys when re-importing.')
+
+    for name, met in metabolites.items():
+        fid      = _extract_complex_fid(met)
+        out_path = os.path.join(output_dir, f"{name}.raw")
+
+        with open(out_path, 'w') as f:
+            f.write(' $NMID\n')
+            f.write(f"  ID     = '{name.upper()}'\n")
+            f.write(f"  FMTDAT = '(2E15.6)'\n")
+            f.write(f"  TRAMP  = 1.0\n")
+            f.write(f"  ISHIFT = 0\n")
+            f.write(' $END\n')
+            for pt in fid:
+                f.write(f" {pt.real:15.6E} {pt.imag:15.6E}\n")
+
+        paths.append(out_path)
+
+    print(f"  Exported {len(paths)} LCModel .raw file(s) to: {output_dir}")
+    return paths
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LCModel .basis  (single multi-metabolite file)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def export_lcmodel_basis(metabolites: dict, header: dict, output_path: str,
+                         config: dict) -> str:
+    """
+    Write all metabolites into a single LCModel .basis file.
+
+    Global acquisition parameters are taken from the internal header.
+    Per-metabolite TRAMP, VOLUME, and CONC are all set to 1.0.
+
+    Returns
+    -------
+    str : Path to the written file.
+    """
+    sw       = float(header['spectralwidth'])           # Hz
+    # header['carrier_frequency'] is in MHz (see build_header_fields)
+    sf_mhz   = float(header['carrier_frequency'])       # MHz = Hz/ppm at this field
+    ns       = int(header['Ns'])
+    te       = float(header.get('TE', config.get('TE', 0.0)))
+    dt       = 1.0 / sw if sw else 1e-4                 # dwell time in seconds
+    seq      = config.get('pulse_sequence', 'unspecified_sequence')
+
+    if seq in ('unspecified_sequence', '', None):
+        _alert('lcmodel_basis',
+               "Pulse sequence name is missing or 'unspecified_sequence'. "
+               "Set 'pulse_sequence' in config for a meaningful SEQ entry.")
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+
+    with open(output_path, 'w') as f:
+        # SEQPAR block
+        f.write(' $SEQPAR\n')
+        f.write(f"  ECHOT  = {te:.4f}\n")
+        f.write(f"  SEQ    = '{seq}'\n")
+        f.write(' $END\n')
+
+        # BASIS1 block  (global acquisition parameters)
+        f.write(' $BASIS1\n')
+        f.write(f"  HZPPPM = {sf_mhz:.6f}\n")   # Hz/ppm = spectrometer freq in MHz
+        f.write(f"  BADELT = {dt:.8E}\n")
+        f.write(f"  NDATAB = {ns}\n")
+        f.write(' $END\n')
+
+        # One $BASIS block per metabolite followed by interleaved FID data
+        for name, met in metabolites.items():
+            fid        = _extract_complex_fid(met)
+            upper_name = name.upper()
+
+            f.write(' $BASIS\n')
+            f.write(f"  ID     = '{upper_name}'\n")
+            f.write(f"  METABO = '{upper_name}'\n")
+            f.write(f"  TRAMP  = 1.0\n")
+            f.write(f"  VOLUME = 1.0\n")
+            f.write(f"  CONC   = 1.0\n")
+            f.write(' $END\n')
+            for pt in fid:
+                f.write(f" {pt.real:15.6E} {pt.imag:15.6E}\n")
+
+    print(f"  Exported LCModel .basis to: {output_path}")
+    return output_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FSL-MRS JSON  (one file per metabolite)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def export_fsl_mrs_json(metabolites: dict, header: dict, output_dir: str,
+                        config: dict) -> list:
+    """
+    Write each metabolite as a separate FSL-MRS .json file.
+
+    The 'seq' sub-dict that FSL-MRS uses to describe the spin system and pulse
+    sequence is not recoverable from basis set data alone and is therefore set
+    to null.  Re-simulating in FSL-MRS requires restoring this information.
+
+    Returns
+    -------
+    list of str : Paths to the written files, in metabolite order.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    sw   = float(header['spectralwidth'])
+    dt   = 1.0 / sw if sw else 1e-4
+    te   = float(header.get('TE',         config.get('TE',         0.0)))
+    cf   = float(header.get('centerFreq', config.get('centerFreq', 4.65)))  # ppm
+    lw   = float(header.get('lw',         2.0))   # linewidth in Hz; default if absent
+
+    _alert('fsl_mrs_json',
+           "Spin system and pulse sequence descriptor ('seq') cannot be "
+           "recovered from basis set data alone. All exported files will have "
+           "'seq': null. Re-simulation in FSL-MRS will not be possible without "
+           "restoring this field.")
+    _alert('fsl_mrs_json',
+           "basis_width is set to the internal linewidth value "
+           f"({lw:.2f} Hz). This field is documented for MM spectra only; "
+           "it may be irrelevant for metabolite basis functions.")
+
+    paths = []
+    for name, met in metabolites.items():
+        fid      = _extract_complex_fid(met)
+        entry    = {
+            'basis_name': name,
+            'basis': {
+                'basis_re':     fid.real.tolist(),
+                'basis_im':     fid.imag.tolist(),
+                'basis_dwell':  dt,
+                'basis_centre': cf,
+                'basis_width':  lw,
+            },
+            'echotime': te,
+            'seq':      None,
+        }
+        out_path = os.path.join(output_dir, f"{name}.json")
+        with open(out_path, 'w') as f:
+            json.dump(entry, f, indent=2)
+        paths.append(out_path)
+
+    print(f"  Exported {len(paths)} FSL-MRS .json file(s) to: {output_dir}")
+    return paths
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Osprey .mat  (single file, BASIS struct)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def export_osprey_mat(metabolites: dict, header: dict, output_path: str,
+                      config: dict) -> str:
+    """
+    Write all metabolites into an Osprey-compatible .mat file.
+
+    FIDs are stored at original simulation amplitude with BASIS.scale = 1.0
+    (i.e. no normalisation has been applied).  Osprey will compute its own
+    runtime scale factor per dataset during fitting, so a stored scale of 1.0
+    is the correct starting point.
+
+    BASIS.nMM is set to 0.  If the metabolite dict contains MM or lipid
+    entries they will be stored as metabolites; adjust nMets/nMM manually
+    after import if Osprey needs the distinction.
+
+    Returns
+    -------
+    str : Path to the written file.
+    """
+    sw     = float(header['spectralwidth'])
+    sf_mhz = float(header['carrier_frequency'])   # MHz (see build_header_fields)
+    ns     = int(header['Ns'])
+    dt     = 1.0 / sw if sw else 1e-4
+    te     = float(header.get('TE',         config.get('TE',         0.0)))
+    b0     = float(header.get('B0',         config.get('B0',         3.0)))
+    cf     = float(header.get('centerFreq', config.get('centerFreq', 4.65)))
+
+    names  = list(metabolites.keys())
+    n_mets = len(names)
+
+    fids_array = np.zeros((ns, n_mets), dtype=complex)
+    for i, name in enumerate(names):
+        fid = _extract_complex_fid(metabolites[name])
+        n   = min(len(fid), ns)
+        fids_array[:n, i] = fid[:n]
+
+    # MATLAB cell array of strings for BASIS.name
+    name_cell = np.zeros((1, n_mets), dtype=object)
+    for i, n in enumerate(names):
+        name_cell[0, i] = n
+
+    _alert('osprey_mat',
+           'BASIS.scale = 1.0 (FIDs stored at original simulation amplitude; '
+           'no normalisation applied). BASIS.nMM = 0; all entries are treated '
+           'as metabolites. If MM/Lip resonances are present, adjust nMets and '
+           'nMM manually after import.')
+    _alert('osprey_mat',
+           'BASIS.Bo is derived from header[\'B0\']. If the source basis set '
+           'was not produced at exactly that field, verify Bo after import.')
+
+    t_axis = np.arange(0, dt * ns, dt)[:ns].reshape(1, -1)
+
+    basis_struct = {
+        'fids':          fids_array,
+        'name':          name_cell,
+        'nMets':         np.array([[n_mets]], dtype=np.float64),
+        'nMM':           np.array([[0]],      dtype=np.float64),
+        'spectralwidth': np.array([[sw]]),
+        'dwelltime':     np.array([[dt]]),
+        'n':             np.array([[ns]],     dtype=np.float64),
+        'sz':            np.array([[ns, n_mets]], dtype=np.float64),
+        'Bo':            np.array([[b0]]),
+        'te':            np.array([[te]]),
+        'centerFreq':    np.array([[cf]]),
+        'scale':         np.array([[1.0]]),
+        't':             t_axis,
+        'ppm':           header.get('ppm', np.zeros((1, ns))),
+    }
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    io.savemat(output_path, {'BASIS': basis_struct})
+    print(f"  Exported Osprey .mat to: {output_path}")
+    return output_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MARSS native .mat  (one file per metabolite, exptDat struct)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def export_marss_native(metabolites: dict, header: dict, output_dir: str,
+                        config: dict) -> list:
+    """
+    Write each metabolite as a separate MARSS-native .mat file.
+
+    Each file contains an 'exptDat' struct with fields sw_h, sf (MHz),
+    nspecC, and fid, matching the layout expected by load_marss_mat().
+    This format is distinct from the simulator-ready single-.mat output
+    written by main(); it is the native per-metabolite MARSS input format.
+
+    Returns
+    -------
+    list of str : Paths to the written files, in metabolite order.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    sw     = float(header['spectralwidth'])
+    # header['carrier_frequency'] is in MHz after build_header_fields;
+    # MARSS stores sf in MHz, so this value is passed through directly.
+    sf_mhz = float(header['carrier_frequency'])
+    ns     = int(header['Ns'])
+    paths  = []
+
+    for name, met in metabolites.items():
+        fid = _extract_complex_fid(met)
+        exptDat = {
+            'sw_h':   np.array([[sw]]),
+            'sf':     np.array([[sf_mhz]]),
+            'nspecC': np.array([[ns]], dtype=np.float64),
+            'fid':    fid.reshape(1, -1),
+        }
+        out_path = os.path.join(output_dir, f"{name}.mat")
+        io.savemat(out_path, {'exptDat': exptDat})
+        paths.append(out_path)
+
+    print(f"  Exported {len(paths)} MARSS-native .mat file(s) to: {output_dir}")
+    return paths
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NIfTI-MRS .nii  (single file, shape 1×1×1×ns×n_mets)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def export_nifti_mrs(metabolites: dict, header: dict, output_path: str,
+                     config: dict) -> str:
+    """
+    Write all metabolites as a NIfTI-MRS .nii file.
+
+    Data shape: (1, 1, 1, ns, n_mets).  The 4th dimension (t) is the FID;
+    the 5th dimension is tagged as DIM_BASIS in the JSON extension.
+    Dwell time is stored in pixdim[4] in seconds.  The JSON extension
+    (ecode=44) encodes SpectrometerFrequency, EchoTime, and metabolite names
+    following the NIfTI-MRS specification (Clarke et al., MRM 2022).
+
+    Returns
+    -------
+    str : Path to the written file.
+    """
+    sw     = float(header['spectralwidth'])
+    sf_mhz = float(header['carrier_frequency'])   # MHz
+    ns     = int(header['Ns'])
+    dt     = 1.0 / sw if sw else 1e-4
+    te     = float(header.get('TE',         config.get('TE',         0.0)))
+    te_s   = te / 1e3                              # ms → s for NIfTI-MRS spec
+    nuc    = config.get('nucleus', '1H')
+
+    names  = list(metabolites.keys())
+    n_mets = len(names)
+
+    data = np.zeros((1, 1, 1, ns, n_mets), dtype=np.complex64)
+    for i, name in enumerate(names):
+        fid = _extract_complex_fid(metabolites[name])
+        n   = min(len(fid), ns)
+        data[0, 0, 0, :n, i] = fid[:n].astype(np.complex64)
+
+    nii_hdr = nib.Nifti1Header()
+    nii_hdr.set_data_dtype(np.complex64)
+    nii_hdr['dim'][0]    = 5        # number of active dimensions
+    nii_hdr['dim'][5]    = n_mets
+    nii_hdr['pixdim'][4] = dt       # dwell time in seconds
+    nii_hdr.set_xyzt_units('mm', 'sec')
+
+    img = nib.Nifti1Image(data, np.eye(4), header=nii_hdr)
+
+    json_ext_dict = {
+        'SpectrometerFrequency': [sf_mhz],
+        'ResonantNucleus':       [nuc],
+        'EchoTime':              te_s,
+        'dim_5':                 'DIM_BASIS',
+        'dim_5_header':          {'Basis': names},
+    }
+    ext_bytes = json.dumps(json_ext_dict, indent=2).encode('utf-8')
+    img.header.extensions.append(nib.nifti1.Nifti1Extension(44, ext_bytes))
+
+    _alert('nifti_mrs',
+           'volume is set to 1.0 (default) and is not embedded in the file. '
+           'Metabolite concentrations are not stored; update the JSON extension '
+           'manually if quantitative volume information is available.')
+    _alert('nifti_mrs',
+           f'SpectrometerFrequency = [{sf_mhz:.4f}] MHz derived from '
+           "header['carrier_frequency']. Verify this matches the actual "
+           'spectrometer frequency of the acquisition.')
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    nib.save(img, output_path)
+    print(f"  Exported NIfTI-MRS to: {output_path}")
+    return output_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dispatcher
+# ─────────────────────────────────────────────────────────────────────────────
+
+def export_basis_set(metabolites: dict, header: dict, config: dict,
+                     export_format: str, output_dir: str,
+                     base_name: str = 'basis_set') -> list:
+    """
+    Dispatch an export request to the appropriate format-specific writer.
+
+    Multi-file formats (lcmodel_raw, fsl_mrs_json, marss_native) write one
+    file per metabolite into ``<output_dir>/<format>/``.
+    Single-file formats (lcmodel_basis, osprey_mat, nifti_mrs) write a single
+    file into ``output_dir``.
+
+    Parameters
+    ----------
+    metabolites   : Internal metabolites dict.
+    header        : Internal header dict.
+    config        : Full config dict.
+    export_format : One of EXPORT_FORMATS.
+    output_dir    : Root output directory.
+    base_name     : Base filename (no extension) for single-file formats.
+
+    Returns
+    -------
+    list of str : Path(s) to all written files.
+    """
+    fmt = export_format.lower()
+
+    if fmt == 'lcmodel_raw':
+        dest = os.path.join(output_dir, 'lcmodel_raw')
+        result = export_lcmodel_raw(metabolites, header, dest, config)
+        return result if isinstance(result, list) else [result]
+
+    elif fmt == 'lcmodel_basis':
+        dest = os.path.join(output_dir, f"{base_name}.basis")
+        return [export_lcmodel_basis(metabolites, header, dest, config)]
+
+    elif fmt == 'fsl_mrs_json':
+        dest = os.path.join(output_dir, 'fsl_mrs_json')
+        result = export_fsl_mrs_json(metabolites, header, dest, config)
+        return result if isinstance(result, list) else [result]
+
+    elif fmt == 'osprey_mat':
+        dest = os.path.join(output_dir, f"{base_name}_osprey.mat")
+        return [export_osprey_mat(metabolites, header, dest, config)]
+
+    elif fmt == 'marss_native':
+        dest = os.path.join(output_dir, 'marss_native')
+        result = export_marss_native(metabolites, header, dest, config)
+        return result if isinstance(result, list) else [result]
+
+    elif fmt == 'nifti_mrs':
+        dest = os.path.join(output_dir, f"{base_name}.nii")
+        return [export_nifti_mrs(metabolites, header, dest, config)]
+
+    else:
+        print(f"  [warn] Unknown export format '{fmt}'. "
+              f"Valid options: {', '.join(EXPORT_FORMATS)}")
+        return []
+
 
 def visual_inspection(metabolites, ppm, flip=False, debug=False):
     # --- Extract field names ---
@@ -965,6 +1481,17 @@ if __name__ == '__main__':
     parser.add_argument('--dt', type=float, default=0.00025)
     parser.add_argument('--MRSCloud', action='store_true', default=False, help='Accounts for MRSCloud exporting basis sets in the spectral domain.')
     parser.add_argument('--debug', action='store_true', default=False)
+    parser.add_argument(
+        '--export_formats',
+        type=str,
+        default=None,
+        help=(
+            'Comma-separated list of additional output formats to export after '
+            'the internal MARSS .mat is written. '
+            'Supported values: ' + ', '.join(EXPORT_FORMATS) + '. '
+            'Example: --export_formats lcmodel_basis,fsl_mrs_json,nifti_mrs'
+        ),
+    )
     # parser.add_argument('--carrier_frequency', type=float, default=127.7)
     args = parser.parse_args()
 
