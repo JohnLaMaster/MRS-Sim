@@ -1,7 +1,7 @@
 import copy
 import math
 import os
-from collections import OrderedDict
+import re
 import json
 
 import numpy as np
@@ -9,17 +9,21 @@ import scipy.io as io
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .interpolate import CubicHermiteMAkima as CubicHermiteInterp
-# from pm_v3 import PhysicsModel
 from torch.fft import fft, fftshift, ifft, ifftshift, irfft, rfft
+
+from .interpolate import CubicHermiteMAkima as CubicHermiteInterp
+
 from types import SimpleNamespace
+from collections import OrderedDict
+
 
 __all__ = ['batch_linspace', 'batch_smooth', 'complex_exp', 'concat_dict', 
            'convertdict', 'counter', 'dict2tensors', 'Fourier_Transform', 
            'HilbertTransform', 'inv_Fourier_Transform', 'normalize', 
            'OrderOfMagnitude', 'rand_omit', 'sample_baselines', 
            'sample_resWater', 'sim2acquired', 'sort_parameters', 
-           'torch2numpy', 'unwrap', 'normalize_old']
+           'torch2numpy', 'unwrap', 'normalize_old', "loadmat_as_dict", 
+           "reorder_metabolite_struct", "sort_special_fields"]
 
 
 PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
@@ -525,3 +529,109 @@ def normalize(signal: torch.Tensor,
 
     return signal / denom, denom
 
+
+def loadmat_as_dict(filename):
+    """
+    Load a MATLAB .mat file and recursively convert structs to Python dicts.
+    """
+    def _check_keys(d):
+        for key in d:
+            if isinstance(d[key], io.matlab.mat_struct):
+                d[key] = _todict(d[key])
+            elif isinstance(d[key], np.ndarray):
+                d[key] = _toarray(d[key])
+        return d
+
+    def _todict(matobj):
+        d = {}
+        for field in matobj._fieldnames:
+            elem = getattr(matobj, field)
+            if isinstance(elem, io.matlab.mat_struct):
+                d[field] = _todict(elem)
+            elif isinstance(elem, np.ndarray):
+                d[field] = _toarray(elem)
+            else:
+                d[field] = elem
+        return d
+
+    def _toarray(ndarray):
+        # Convert arrays that may contain structs
+        if ndarray.dtype == object:
+            return [_todict(el) if isinstance(el, io.matlab.mat_struct)
+                    else el for el in ndarray]
+        else:
+            return ndarray
+
+    data = io.loadmat(filename, struct_as_record=False, squeeze_me=True)
+    return _check_keys(data)
+
+
+def reorder_metabolite_struct(S):
+    """
+    Recursively reorder a MATLAB-like struct (Python dict).
+
+    Order:
+    1. Alphabetical (non-MM, non-Lip)
+    2. MM* sorted numerically by suffix
+    3. Lip* sorted numerically by suffix
+    """
+
+    # --- Base cases ---
+    if isinstance(S, list):
+        return [reorder_metabolite_struct(x) for x in S]
+
+    if not isinstance(S, dict):
+        return S
+
+    fn = list(S.keys())
+    fn_lower = [f.lower() for f in fn]
+
+    is_mm  = [f.startswith('mm') for f in fn_lower]
+    is_lip = [f.startswith('lip') for f in fn_lower]
+    is_other = [not (mm or lip) for mm, lip in zip(is_mm, is_lip)]
+
+    # --- Split groups ---
+    other_fields = sorted([f for f, keep in zip(fn, is_other) if keep])
+    mm_fields    = sort_special_fields([f for f, keep in zip(fn, is_mm) if keep], 'mm')
+    lip_fields   = sort_special_fields([f for f, keep in zip(fn, is_lip) if keep], 'lip')
+
+    new_order = other_fields + mm_fields + lip_fields
+
+    # --- Rebuild ordered dict ---
+    S_ordered = {}
+    for f in new_order:
+        val = S[f]
+        if isinstance(val, (dict, list)):
+            val = reorder_metabolite_struct(val)
+        S_ordered[f] = val
+
+    return S_ordered
+
+
+def sort_special_fields(fields, prefix):
+    """
+    Sort fields like:
+        MM09, MM092, MM12, MM121
+
+    Correctly distinguishes:
+        MM09 ≠ MM092  (no prefix confusion)
+
+    Sorting rule:
+        1. numeric suffix (09 -> 9, 092 -> 92)
+        2. then full string (stable tie-breaker)
+    """
+
+    if not fields:
+        return fields
+
+    prefix = prefix.lower()
+
+    def extract_number(name):
+        # strict match: prefix + digits ONLY at start
+        match = re.match(rf'^{prefix}(\d+)$', name, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+        return float('inf')  # non-matching go last
+
+    # sort by numeric value, then by full string to avoid ambiguity
+    return sorted(fields, key=lambda x: (extract_number(x), x))
