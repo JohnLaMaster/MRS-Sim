@@ -23,12 +23,18 @@ __all__ = ['batch_linspace', 'batch_smooth', 'complex_exp', 'concat_dict',
            'OrderOfMagnitude', 'rand_omit', 'sample_baselines', 
            'sample_resWater', 'sim2acquired', 'sort_parameters', 
 <<<<<<< HEAD
+<<<<<<< HEAD
            'torch2numpy', 'unwrap', 'normalize_old', "loadmat_as_dict", 
            "reorder_metabolite_struct", "sort_special_fields"]
 =======
            'torch2numpy', 'unwrap', 'normalize_old', '_fftshift', '_ifftshift',
           'npfftshift', 'npifftshift']
 >>>>>>> ac703756dc625c175f3276a86d8de525b2ff3d5a
+=======
+           'torch2numpy', 'unwrap', 'normalize_old', 'loadmat_as_dict', 
+           'reorder_metabolite_struct', 'sort_special_fields', '_fftshift', 
+           '_ifftshift', 'npfftshift', 'npifftshift']
+>>>>>>> 6f5bb161f994f16e4a127c036e2967cfa2f10d86
 
 
 PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
@@ -645,4 +651,8 @@ def sort_special_fields(fields, prefix):
         return float('inf')  # non-matching go last
 
     # sort by numeric value, then by full string to avoid ambiguity
+<<<<<<< HEAD
     return sorted(fields, key=lambda x: (extract_number(x), x))
+=======
+    return sorted(fields, key=lambda x: (extract_number(x), x))
+>>>>>>> 6f5bb161f994f16e4a127c036e2967cfa2f10d86
