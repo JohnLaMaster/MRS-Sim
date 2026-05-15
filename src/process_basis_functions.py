@@ -13,6 +13,12 @@ from collections import OrderedDict
 from .aux import loadmat_as_dict, reorder_metabolite_struct, npfftshift, npifftshift
 
 
+__all__ = ['gamma_nucleus', 'load_marss_mat', 'load_osprey_mat', 'load_lcmodel_basis', 
+           'load_raw_basis', 'load_nifti_mrs_basis', 'load_fsl_mrs_basis_dir', 'build_header_fields', 
+           'assign_fid', 'EXPORT_FORMATS', 'export_lcmodel_raw', 'export_lcmodel_basis', 
+           'export_fsl_mrs_json', 'export_osprey_mat', 'export_marss_native', 'export_nifti_mrs']
+
+
 # # Gyromagnetic Ratios for common nuclei
 gamma_nucleus = {
     '1H'    : 42.5769e6, # Hz/T
@@ -669,7 +675,7 @@ def mrscloud_correction(metabolites):
         tmp = np.fliplr(npfftshift(metabolites[k]['fid'], axis=1))
         tmp = tmp[:,0,:] + 1j*tmp[:,1,:]
         tmp = np.fft.ifft(npifftshift(tmp, axes=-1), axis=-1)
-        metabolites[k]['fid'] = fit_to_stack(tmp)
+        metabolites[k]['fid'] = fid_to_stack(tmp)
     return metabolites
 
 # def calc_dt(fid: np.ndarray) -> float:
