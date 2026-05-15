@@ -22,8 +22,13 @@ __all__ = ['batch_linspace', 'batch_smooth', 'complex_exp', 'concat_dict',
            'HilbertTransform', 'inv_Fourier_Transform', 'normalize', 
            'OrderOfMagnitude', 'rand_omit', 'sample_baselines', 
            'sample_resWater', 'sim2acquired', 'sort_parameters', 
+<<<<<<< HEAD
            'torch2numpy', 'unwrap', 'normalize_old', "loadmat_as_dict", 
            "reorder_metabolite_struct", "sort_special_fields"]
+=======
+           'torch2numpy', 'unwrap', 'normalize_old', '_fftshift', '_ifftshift',
+          'npfftshift', 'npifftshift']
+>>>>>>> ac703756dc625c175f3276a86d8de525b2ff3d5a
 
 
 PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
@@ -170,6 +175,12 @@ def _fftshift(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
 
 def _ifftshift(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
     return torch.roll(x, shifts=-(x.shape[dim] // 2), dims=dim)
+
+def npfftshift(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    return np.roll(x, shift=x.shape[axis] // 2, axis=axis)
+
+def npifftshift(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    return np.roll(x, shift=-(x.shape[axis] // 2), axis=axis)
                       
 def Fourier_Transform(signal: torch.Tensor) -> torch.Tensor: 
     assert(signal.ndim>=3)
