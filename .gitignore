@@ -27,3 +27,5 @@ MRS-Sim_pages*
 temp.pdf
 *scratch*
 /ignore/*
+/src/NIfTIMRS/nifti_mrs.py
+/src/aux/io_read_basis_sets.py

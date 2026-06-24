@@ -7,7 +7,7 @@ from collections import OrderedDict
 import numpy as np
 from scipy.io import savemat as io_savemat
 from .aux import sample_baselines, sample_resWater, sort_parameters, concat_dict
-# from NIfTIMRS import Mat2NIfTI_MRS
+from .NIfTIMRS import Mat2NIfTI_MRS
 from .physics_model import PhysicsModel
 from types import SimpleNamespace
 
@@ -114,8 +114,8 @@ def simulate(inputs, args=None):
     step = args.stepSize
     threshold = args.batchSize
     path = args.savedir + '/dataset_spectra'
-    # if config.NIfTIMRS: 
-    #     save2nifti = Mat2NIfTI_MRS(combine_complex=True, test_output=True)
+    if config.NIfTIMRS: 
+        save2nifti = Mat2NIfTI_MRS(combine_complex=True, test_output=True)
     counter = 0
     for i in range(0,config.totalEntries,step):
         n = i+step if i+step<=params.shape[0] else i+(params.shape[0])
@@ -169,8 +169,9 @@ def simulate(inputs, args=None):
                              cropRange=pm.cropRange, 
                              ppm=ppm,
                              header=config.header)
-            # if config.NIfTIMRS:
-            #     save2nifti.forward(datapath=new_path)
+            print('new_path: ',new_path)
+            if config.NIfTIMRS:
+                save2nifti.forward(datapath=new_path)
             first = True
             counter += 1
             print('>>> ** {} ** <<<'.format(counter))
@@ -186,7 +187,8 @@ def simulate(inputs, args=None):
                              cropRange=pm.cropRange, 
                              ppm=ppm,
                              header=config.header)
-            # if config.NIfTIMRS:
-            #     save2nifti.forward(datapath=new_path)
+            print('new_path: ',new_path)
+            if config.NIfTIMRS:
+                save2nifti.forward(datapath=new_path)
         del spectra, fit, baseline, reswater, parameters, quantities
     return path

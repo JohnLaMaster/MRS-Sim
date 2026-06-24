@@ -11,6 +11,7 @@ import scipy.io as io
 from pathlib import Path
 
 from src.aux import loadmat_as_dict
+from .convention_testing import test_nifti_mrs_conventions
 
 # from torch.nn import Module
 
@@ -181,6 +182,15 @@ class Mat2NIfTI_MRS():
         loaded_he_content = json.loads(check_nifti.header.extensions[0].get_content())
 
         assert loaded_he_content == meta_dict
+        
+        # ---- NIfTI-MRS format convention tests ----
+        test_nifti_mrs_conventions(
+            save_path,
+            save_name,
+            expected_peak_ppm=4.65,   # set to your dominant simulated peak
+            ppm_reference=4.65,
+            allow_unlocalised=True,   # True for simulations
+        )
 
         # Delete testing data
         os.remove(base_name +'.h5')
