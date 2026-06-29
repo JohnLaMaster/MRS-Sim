@@ -22,9 +22,9 @@ __all__ = ['batch_linspace', 'batch_smooth', 'complex_exp', 'concat_dict',
            'HilbertTransform', 'inv_Fourier_Transform', 'normalize', 
            'OrderOfMagnitude', 'rand_omit', 'sample_baselines', 
            'sample_resWater', 'sim2acquired', 'sort_parameters', 
-           'torch2numpy', 'unwrap', 'normalize_old', "loadmat_as_dict", 
+           'torch2numpy', 'unwrap', 'normalize_old', 'loadmat_as_dict', 
            'reorder_metabolite_struct', 'sort_special_fields', '_fftshift', 
-           '_ifftshift', 'npfftshift', 'npifftshift']
+           '_ifftshift', 'npfftshift', 'npifftshift', 'load_parameters']
 
 
 PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
@@ -129,8 +129,11 @@ def convertdict(file, simple=False, device='cpu'):
             elif k in ['notes', 'seq','vendor','pulse_sequence', 'pulseSequence']:
                 delete.append(k)
             else:
-                file[k] = torch.from_numpy(np.asarray(file[k], 
-                                    dtype=np.float32)).squeeze().to(device)
+                try:
+                    file[k] = torch.from_numpy(np.asarray(file[k], 
+                                        dtype=np.float32)).squeeze().to(device)
+                except ValueError:
+                    pass
         else:
             delete.append(k)
     if len(delete)>0:

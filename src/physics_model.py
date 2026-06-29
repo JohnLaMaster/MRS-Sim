@@ -9,15 +9,17 @@ import numpy as np
 import scipy.io as io
 import torch
 import torch.nn as nn
+
 from numpy import pi
+
 from .aux import *
 from .baselines import bounded_random_walk
-from .interpolate import CubicHermiteMAkima as CubicHermiteInterp
+from .aux.interpolate import CubicHermiteMAkima as CubicHermiteInterp
 from types import SimpleNamespace
 from typing import List, Tuple
 
-__all__ = ['PhysicsModel']
 
+__all__ = ['PhysicsModel']
 
 
 PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
@@ -27,7 +29,7 @@ PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
 gamma_p = torch.as_tensor(42.577478518)
 
 
-@torch.no_grad()
+# @torch.no_grad()
 class PhysicsModel(nn.Module):
     def __init__(self, 
                  PM_basis_set: str,
@@ -144,6 +146,7 @@ class PhysicsModel(nn.Module):
         self._metab, l, self.MM = self.order_metab(metab)
         self.MM = self.MM + 1 if  self.MM>-1 else False
         num_bF = l + self.MM if self.MM else l
+        # print('number of basis functions (num_bF): ',num_bF)
         # Initialize basic variables
         self.lineshape_type = lineshape
         self.cropRange = cropRange if cropRange else [self._ppm.min(), 
@@ -339,7 +342,7 @@ class PhysicsModel(nn.Module):
         # Zero-Order phase unalignment
         ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,num_coils)))
 
-        ind.append(cnt(1)) # Temperature
+        # ind.append(cnt(1)) # Temperature
 
         # # Cummulative
         total = cnt(1)
@@ -363,13 +366,14 @@ class PhysicsModel(nn.Module):
         dct.update({'Coil_Sens':   torch.empty(1)})
         dct.update({'Coil_fShift': torch.empty(1)})
         dct.update({'Coil_Phi0':   torch.empty(1)})
-        dct.update({'Temperature': torch.empty(1)})
+        # dct.update({'Temperature': torch.empty(1)}) # Not implemented yet, but on the TODO list
         dct.update({'Metabolites': torch.empty(1), 
                     'Parameters':  torch.empty(1), 
                     'Overall':     torch.empty(1)})
         
         # Combine and define the index for internal use in the model
         self._index = OrderedDict({d.lower(): i for d,i in zip(dct.keys(),ind)})
+        # print('inside initialization at the end -- ind: ',ind)
 
         return dct, ind
 
@@ -384,15 +388,26 @@ class PhysicsModel(nn.Module):
         self.new_params = OrderedDict()
                                     
         for i, m in enumerate(header):
-            met, temp, strt = False, None, None
+            met, temp, strt = False, {}, None
+            # if m.lower() in self.ranges.keys():
             if m.lower() in self.basisFcns['metabolites'].keys(): 
                 # temp = self.basisFcns['metabolites'][m.lower()]
-                temp = self.ranges[m.lower()]['Conc']
+                try:
+                    temp = self.ranges[m.lower()]['Conc']
+                except:
+                    self.new_params[m] = i
+                    temp['min'] = 0
+                    temp['max'] = 1
                 met = True
             elif m in ['d','dmm']:
                 # print(i, m, num_mets, i-num_mets, header[i-num_mets])
                 met = header[i-num_mets]
-                temp = self.ranges[met.lower()]['T2']['metab']
+                try:
+                    temp = self.ranges[met.lower()]['T2']['metab']
+                except:
+                    temp = {}
+                    temp['min'] = 0
+                    temp['max'] = 1
             elif m in self.basisFcns['artifacts'].keys(): 
                 temp = self.basisFcns['artifacts'][m]
             elif m in ['fshiftmet','fshiftmm']:
@@ -410,6 +425,7 @@ class PhysicsModel(nn.Module):
                 # Allow metabolties outside of the database to be included
                 # These are placeholder values that then need to be defined via the 'paramters'
                 # field of the simulation's config file and set using set_parameter_constraints()
+                # if m.lower() in self.basisFcns['metabolites'].keys():
                 self.new_params[m] = i
                 temp['min'] = 0
                 temp['max'] = 1
@@ -426,8 +442,8 @@ class PhysicsModel(nn.Module):
                 TODO: How and where to store the temperature induced fshift information?
                 Same for the T2 info!
                 '''
-            if len(new_params)>0:
-                self.new_params_assert_msg = f'The following parameters are being used but have not had their preset values defined:'#.format([k for k in self.new_params.keys())
+            if len(self.new_params)>0:
+                self.new_params_assert_msg = f'The following parameters are being used but have not had their preset values defined:'.format([k for k in self.new_params.keys()])
 
     
     def add_inhomogeneities(self,
@@ -1363,7 +1379,7 @@ class PhysicsModel(nn.Module):
                 if k in self.new_params.keys(): 
                     self.new_params.pop(k)
         
-        assert len(self.new_params.keys())==0, self.new_params_assert_msg + '\n {}'.format([k for k in self.new_params.keys()])
+        # assert len(self.new_params.keys())==0, self.new_params_assert_msg + '\n {}'.format([k for k in self.new_params.keys()])
             
     
         

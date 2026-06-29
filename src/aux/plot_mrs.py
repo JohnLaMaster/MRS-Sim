@@ -42,7 +42,8 @@ import h5py
 import argparse
 
 from collections import OrderedDict
-from types import Optional
+# from types import Optional
+from typing import Optional
 
 # ══════════════════════════════════════════════════════════════
 #  USER SETTINGS
@@ -84,6 +85,12 @@ N_MET = len(MET_KEYS)
 # ──────────────────────────────────────────────────────────────
 #  I/O helpers
 # ──────────────────────────────────────────────────────────────
+def int_or_str(val: str) -> int | str:
+    """Runtime conversion function."""
+    try:
+        return int(val)
+    except ValueError:
+        return val
 
 def load_mat(filepath):
     """
@@ -264,7 +271,7 @@ def main():
         # Keep track of current vertical level (top → bottom)
         offset = 0.0
         rx = 7.5*1.25
-        print('spec_range: ',spec_range, np.amax(spec_real*rx+offset))
+        # print('spec_range: ',spec_range, np.amax(spec_real*rx+offset))
 
         # ── 6. Top spectrum (data + model components) ────────────────
         # ax.axvline(x=0, color="silver", lw=2.8, zorder=0)
@@ -298,10 +305,11 @@ def main():
             offset -= OFFSET_STEP
             if lbl.lower().startswith("mm"): mm += sp*rx1
             
-        ax.plot(ppm, mm + offset, color='black', lw=0.6)
-        ax.annotate("MM Sum", xy=(1.01, offset), xycoords=("axes fraction", "data"),
-                    fontsize=ANNOT_FS, va="center", ha="left")
-        offset -= OFFSET_STEP
+        if any("mm" in label.lower() for label in MET_LABELS):
+            ax.plot(ppm, mm + offset, color='black', lw=0.6)
+            ax.annotate("MM Sum", xy=(1.01, offset), xycoords=("axes fraction", "data"),
+                        fontsize=ANNOT_FS, va="center", ha="left")
+            offset -= OFFSET_STEP
         
         # ── 8. Residual water panel ───────────────────────────────
         # residual = spec_real - bl_real - fit_real
@@ -333,12 +341,13 @@ def main():
         y_min = min(np.min(d) for d in all_data) - OFFSET_STEP * (len(all_data)+2)#1)
         y_max = np.max(spec_real)*rx*1.25 + OFFSET_STEP
         ax.set_ylim(y_min, y_max)
-        print("ymin: {}, ymax: {}".format(y_min,y_max))
+        # print("ymin: {}, ymax: {}".format(y_min,y_max))
         
         # ── 9. Save / show ────────────────────────────────────────
         if SAVE_PATH:
-            fig.savefig(SAVE_PATH, dpi=300, bbox_inches="tight")
-            print(f"Saved → {SAVE_PATH}")
+            save_name = os.path.join(SAVE_PATH,f'spectrum_{idx}')
+            fig.savefig(save_name, dpi=300, bbox_inches="tight")
+            print(f"Saved → {save_name}")
         plt.show()
 
 
@@ -347,7 +356,7 @@ if __name__ == "__main__":
     parser.add_argument('--data', type=str, default=None, help='Path to .mat file of exported MRS-Sim simulations.')
     parser.add_argument('--basis_set', type=str, default=None, help='Path to MRS-Sim basis set used for the simulations.')
     parser.add_argument('--savedir', type=str, default=None, help='Directory for saving the plotted figures.') # set None to skip saving
-    parser.add_argument('--ind', type=int, default=None, help='Integer index or str of ","-separated indices for which spectra to plot.')
+    parser.add_argument('--ind', default=None, help='Integer index or str of ","-separated indices for which spectra to plot.')
     parser.add_argument('--ppm', type=str,default=None, help='PPM range for the plotted data.')
     parser.add_argument('--show_fit', action='store_true', default=False, help='Display the clean "fit" on top of the plotted simulation(s).')
     parser.add_argument('--met_labels', type=str, default=None, help='String with ","-separable metabolite labels listing what should be included in the plots.')
@@ -366,6 +375,8 @@ if __name__ == "__main__":
     if args.ppm:        
         args.ppm = [float(x) for x in args.ppm.split(',')]
         if args.ppm[0]<args.ppm[1]: args.ppm.reverse()
+    # if isinstance(args.met_labels, str):
+    #     args.met_labels = [met for met in args.met_labels.split(",")]
     
     MAT_FILE     = args.data                  if args.data       else MAT_FILE
     BASIS_FILE   = args.basis_set             if args.basis_set  else BASIS_FILE
@@ -378,3 +389,14 @@ if __name__ == "__main__":
     N_MET        = len(MET_KEYS)
 
     main()
+
+'''
+$ python ./src/aux/plot_mrs.py 
+--data '/home/john/Documents/Repositories/MRS-Sim/dataset/COWS/dataset_spectra_0.mat'
+--basis_set '/home/john/Documents/Repositories/MRS-Sim/src/basis_sets/references/raw_COWS7_sLASER_30_Siemens_3000.mat'
+--savedir '/home/john/Documents/Repositories/MRS-Sim/dataset/COWS/'
+--ind '1,2,3,4,5,6,7,8,9,10'
+--ppm '5.0,0.5'
+--met_labels "Asc,Asp,Cho,Cr391,CrNo391,GABA,Gln,Glu,Gly,GPC,GSH,Lac,mI,NAA,NAAG,PCr393,PCrNo393,PE,sI,Tau,MM09"
+'''
+# $ python ./src/aux/plot_mrs.py --data '/home/john/Documents/Repositories/MRS-Sim/dataset/COWS/dataset_spectra_0.mat' --basis_set '/home/john/Documents/Repositories/MRS-Sim/src/basis_sets/references/raw_COWS7_sLASER_30_Siemens_3000.mat' --savedir '/home/john/Documents/Repositories/MRS-Sim/dataset/COWS/' --ind '1,2,3,4,5,6,7,8,9,10' --ppm '5.0,0.5' --met_labels "Asc,Asp,Cho,Cr391,CrNo391,GABA,Gln,Glu,Gly,GPC,GSH,Lac,mI,NAA,NAAG,PCr393,PCrNo393,PE,sI,Tau,MM09"

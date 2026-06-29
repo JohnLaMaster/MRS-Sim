@@ -49,12 +49,17 @@ def prepare(config_file):
                   spectral_resolution=config.spectral_resolution,
                   spectralwidth=config.spectralwidth,
                 #   snr_metab=config.snr_metab,
-                  wrt_metab=config.wrt_metab)
+                  wrt_metab=config.wrt_metab,
+                  snr_metab=config.snr_metab,)
     config.header = pm.header
 
     # print(pm.index)
-    if parameters: pm.set_parameter_constraints(parameters)
+    if parameters: 
+        pm.set_parameter_constraints(parameters)
+        # TODO: I want to be able to add parameters using this function even if they don't appear in the metabolite database
     ind = pm.index
+    # print("ind: ",ind)
+    # print("ind['metabolites']: ",ind['metabolites'])
     l = len(ind['metabolites'])
 
     

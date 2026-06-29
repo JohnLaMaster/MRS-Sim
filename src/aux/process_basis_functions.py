@@ -10,13 +10,14 @@ import matplotlib.pyplot as plt
 
 from collections import OrderedDict
 
-from .aux import loadmat_as_dict, reorder_metabolite_struct, npfftshift, npifftshift
+from . import loadmat_as_dict, reorder_metabolite_struct, npfftshift, npifftshift
 
 
 __all__ = ['gamma_nucleus', 'load_marss_mat', 'load_osprey_mat', 'load_lcmodel_basis', 
-           'load_raw_basis', 'load_nifti_mrs_basis', 'load_fsl_mrs_basis_dir', 'build_header_fields', 
-           'assign_fid', 'EXPORT_FORMATS', 'export_lcmodel_raw', 'export_lcmodel_basis', 
-           'export_fsl_mrs_json', 'export_osprey_mat', 'export_marss_native', 'export_nifti_mrs']
+           'load_raw_basis', 'load_nifti_mrs_basis', 'load_fsl_mrs_basis_dir', 'mrscloud_correction', 
+           'build_header_fields', 'assign_fid', 'EXPORT_FORMATS', 'export_lcmodel_raw', 
+           'export_lcmodel_basis', 'export_fsl_mrs_json', 'export_osprey_mat', 'export_marss_native', 
+           'export_nifti_mrs', 'visual_inspection', 'export_basis_set']
 
 
 # # Gyromagnetic Ratios for common nuclei
@@ -693,7 +694,7 @@ def mrscloud_correction(metabolites):
 # def main(cfg_path: str):
     # with open(cfg_path, 'r') as f:
     #     config = json.load(f)
-def main(config: dict):
+def main(config: dict, save_mrs_sim_format: bool=True):
     # Check if the nucleus was specified and if not, assume 1H
     # list of options are defined by gamma_nucleus above
     nuc = config.get('nucleus','1H')
@@ -884,12 +885,13 @@ def main(config: dict):
         save_dir = os.path.join(save_dir, config['save_subdir'])
     save_dir  = os.path.dirname(save_dir)
     save_path = os.path.join(save_dir, save_name)
-    io.savemat(save_path,
-               mdict={'metabolites': metabolites,
-                      'header':      header,
-                    #   'artifacts':   artifacts
-                      })
-    print(f"\nSaved basis set '{save_name}' to: {save_dir}")
+    if save_mrs_sim_format:
+        io.savemat(save_path,
+                mdict={'metabolites': metabolites,
+                        'header':      header,
+                        #   'artifacts':   artifacts
+                        })
+        print(f"\nSaved basis set '{save_name}' to: {save_dir}")
 
     # -- Export to additional formats ----------------------------------------
     export_formats = config.get('export_formats', [])
@@ -1567,4 +1569,16 @@ python -m src.process_basis_functions
 $ python -m src.process_basis_functions --spin_path '/home/john/Documents/Repositories/MARSSCompiled/VERI_GE_PRESS_30ms/SummedSpins_for_MARSSinput' --save_subdir 'references/VERI_MARSS' --save_name_prefix 'MARSS_mat' --pulse_sequence 'PRESS' --vendor 'GE' --centerFreq 4.65 --sim_software 'MARSS'
 TODO: .BASIS FIDs are actually stored in the frequency domain and flipped???
 TODO: This just might be a quirk of MRSCloud
+
+python -m src.process_basis_functions 
+--spin_path './src/basis_sets/references/raw_basis_functions'
+--save_subdir 'references/raw_basis_functions'
+--save_name_prefix 'raw'
+--pulse_sequence 'COWS7_sLASER'
+--vendor 'Siemens'
+--centerFreq 4.65
+--sim_software 'MARSS'
+$ python -m src.process_basis_functions --spin_path './src/basis_sets/references/raw_basis_functions' --save_subdir 'references/raw_basis_functions' --save_name_prefix 'raw' --pulse_sequence 'COWS7_sLASER' --vendor 'Siemens' --centerFreq 4.65 --sim_software 'MARSS'
+TODO: Some of these formats will need json sidecar files or something
+TODO: The .RAW basis functions are reversed spectrally
 '''

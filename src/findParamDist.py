@@ -13,6 +13,7 @@ from collections import OrderedDict
 from matplotlib.pyplot import close as plt_close
 from matplotlib.pyplot import savefig as plt_savefig
 from scipy.io import loadmat as ioloadmat
+# from copy import deepcopy, copy
 
 from fitter import Fitter as Fitter
 from fitter import get_common_distributions, get_distributions
@@ -23,6 +24,13 @@ from typing import Tuple, Optional
 
 sys.path.append('../')
 
+
+NONNEGATIVE_DIST = [
+    "gamma", "lognorm", "weibull_min", "nakagami", "truncexpon", "truncnorm", "truncweibull_min",
+    "expon", "chi2",
+    "halfcauchy", "halflogistic", "halfnorm", "halfgennorm", #"beta"
+]
+TAGS = ['ampl','lorentzLB','freqShift','SNR','ph0','ph1']
 
 def loadParams(parameters_path: Optional[str | list | None], ) -> Tuple:
     '''
@@ -47,6 +55,25 @@ def loadParams(parameters_path: Optional[str | list | None], ) -> Tuple:
         if i==0:
             names = temp['header']['names']
         temp.pop('header', None)
+        
+        # print(f'temp.keys(): {temp.keys()}')
+        
+        # Only fit the targeted variables
+        # Helps with the simulation part because entries don't need to be deleted manually
+        # keys = list(temp.keys())
+        # for k in keys:
+        #     keep = False
+        #     for tag in TAGS:
+        #         print(f'k: {k}, tag: {tag}')
+        #         if tag in k:
+        #             keep = True
+        #             break  # stop checking tags
+        #         if not tag in k:
+        #             temp.pop(k, None)
+        for k in list(temp.keys()):
+            if not any(tag in k for tag in TAGS):
+                # print(f'Popping key {k} from the loaded parameters.')
+                temp.pop(k, None)
 
         # print('temp: ',temp)
 
@@ -85,6 +112,8 @@ def findDistribution(v: np.ndarray,
     # Unpack distributions
     if not args.distributions:
         dist = get_common_distributions() if args.commonDist else get_distributions()
+    elif "nonnegative" in args.distributions:
+        dist = NONNEGATIVE_DIST
     else:
         dist = args.distributions
 
@@ -97,7 +126,7 @@ def findDistribution(v: np.ndarray,
     # Bootstrap settings
     boot = args.bootstrapping
     metric = getattr(args, "bootstrap_metric", "sumsquare_error")
-    top_k = int(getattr(args, "top_k", 3))
+    top_k = int(getattr(args, "top_k", 5))
 
     # Iterate through the number of fitted metabolites per variable
     for i in range(v.shape[-1]):
@@ -175,6 +204,7 @@ def findDistribution(v: np.ndarray,
 def main(args):
     # Load the parameters to find their distributions
     params, sample_size, names = loadParams(args.paramPath)
+    set_distributions = args.distributions
 
     args.nx = 1 if args.n == -1 else args.nx
     if args.n == -1:
@@ -201,7 +231,13 @@ def main(args):
         param_keys = list(args.paramKeys)
         
     # print('param_keys = ',param_keys)
-
+    
+    # Check if files already exist and delete
+    summary_path = os.path.join(args.savedir, f'summary_of_{args.Nbest}_best_fits.json')
+    best_path = os.path.join(args.savedir, 'parameter_distributions_best_fit.json')
+    if os.path.exists(summary_path): os.remove(summary_path)
+    if os.path.exists(best_path): os.remove(best_path)
+    
     def pretty_name(k, met):
         if k == 'ampl':
             return f'{met}_ampl'
@@ -233,8 +269,17 @@ def main(args):
 
             num_vars = v.shape[1]
             # base_key = pretty_name(k)
+            
 
             for j in range(num_vars):
+                # print(f'params_keys: {k}')
+                if any(token.lower() in k.lower() for token in ["ampl", "lorentzLB", "gaussLB", "SNR"]):
+                    print(f'Key {k} needs to be nonnegative.')
+                    args.distributions = "nonnegative"
+                else:
+                    print(f'Key {k} needs can be positive or negative.')
+                    args.distributions = set_distributions
+                
                 # keep a 2D slice so findDistribution still sees one variable
                 if num_vars>1:
                     met_name = names[j] if j < len(names) else f"met_{j}"
@@ -333,8 +378,9 @@ if __name__=='__main__':
         
     # Limit analysis to specific variables
     if not args.paramKeys:
+        args.paramKeys = 'ampl,ph0,ph1,gaussLB,lorentzLB,freqShift,Cr_SNR,residual_water_ampl,global_freqShift'
         # args.paramKeys = 'ampl,ph0,ph1,gaussLB,lorentzLB,freqShift,Res,refShift,refFWHM,Cr_SNR,Cr_FWHM,residual_water_ampl,global_freqShift,relResA'
-        args.paramKeys = 'gaussLB,lorentzLB,freqShift,Res,refShift,refFWHM,Cr_SNR,Cr_FWHM,global_freqShift,relResA'
+        # args.paramKeys = 'gaussLB'#,lorentzLB,freqShift,Res,refShift,refFWHM,Cr_SNR,Cr_FWHM,global_freqShift,relResA'
     args.paramKeys = [k for k in args.paramKeys.split(',')]
     
     # print(args.paramKeys)

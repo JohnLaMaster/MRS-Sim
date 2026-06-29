@@ -68,7 +68,7 @@ def listValidBasisFunctionNames(type_in: str='mets'):
             ['bHG', '2HG', '2-HG'],   # 2-hydroxyglutarate
             'Car',   # Carnitine
             'Cit',   # Citrate
-            ['Cr', 'Cre'],    # Cr
+            ['Cr', 'Cre', 'Cr391', 'CrNo391', 'Cre391', 'CreNo391'],    # Cr
             'Cys',   # Cysteic acid
             'Cystat',# Cystat
             'CrCH2', # negative CrCH2 correction signal
@@ -96,7 +96,7 @@ def listValidBasisFunctionNames(type_in: str='mets'):
             'NAA',   # N-Acetylaspartate
             'NAAG',  # N-Acetylaspartylglutamate
             ['PCh', 'PCho'],   # Phosphocholine
-            'PCr',   # Phosphocreatine
+            ['PCr', 'PCr393', 'PCrNo393'],   # Phosphocreatine
             'PE',    # Phosphoethanolamine
             'Pgc',   # Propyleneglycol
             ['Phenyl', 'PAl'],    # Phenylalanine
