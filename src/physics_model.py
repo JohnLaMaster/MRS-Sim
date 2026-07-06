@@ -143,7 +143,7 @@ class PhysicsModel(nn.Module):
                   ) -> tuple:
         # # Sort metabs and group met vs mm/lip
         # print('PM.intialize.metab: ',metab) # correct
-        self._metab, l, self.MM = self.order_metab(metab)
+        self._metab, l, self.MM = order_metab(metab)
         self.MM = self.MM + 1 if  self.MM>-1 else False
         num_bF = l + self.MM if self.MM else l
         # print('number of basis functions (num_bF): ',num_bF)
@@ -1174,34 +1174,6 @@ class PhysicsModel(nn.Module):
         return signal / denom, denom
 
 
-    def order_metab(self, 
-                    metab: list,
-                   ) -> tuple:
-        mm_lip, mm, lip, temp, num_mm = [], [], [], [], -1
-        for i, k in enumerate(metab): 
-            if 'mm' in k.lower(): 
-                mm.append(k)
-                temp.append(i)
-                num_mm += 1
-            mm = sorted(mm)
-        mm_lip += mm
-        for i, k in enumerate(metab):
-            if 'lip' in k.lower():
-                lip.append(k)
-                temp.append(i)
-                num_mm += 1
-            lip = sorted(lip)
-        mm_lip += lip
-        temp.reverse()
-        for term in temp: 
-            metab.pop(term)
-        metab = sorted(metab, key=str.casefold)
-
-        if num_mm>-1:
-            return metab + mm_lip, len(metab), num_mm
-        return metab, len(metab), num_mm
-
-
     def out_of_voxel_echo(self,
                           fid: torch.Tensor,
                           params: torch.Tensor, # [bS,5]
@@ -1579,18 +1551,21 @@ class PhysicsModel(nn.Module):
                 # fidSum.shape = [bS, (syn / filtered), 2, spec_length]
             
             
-        # Calculating the power and spectral metabolite-level SNRs
-        # fid.shape [bS, 2, spec_length] and noise.shape [bS, ..., transients, channels, length]
-        # Power SNR
-        for _ in range(noise_vec.ndim - pSNR.ndim): 
-            pSNR = pSNR.unsqueeze(-3)
-        # print("noise_vec.std(dim=-1, keepdims=True).shape: ",noise_vec.std(dim=-1, keepdims=True).shape)
-        pSNR /= noise_vec.std(dim=-1, keepdims=True).unsqueeze(1)
-        # Spectral SNR
-        for _ in range(noise_vec.ndim - sSNR.ndim): 
-            sSNR = sSNR.unsqueeze(-3)
-        # print("sSNR.dtype: {}; noise_vec.dtype {}".format(sSNR.dtype,noise_vec.dtype))
-        sSNR /= noise_vec.std(dim=-1, keepdims=True).unsqueeze(1)[...,0,:].unsqueeze(-2)
+            # Calculating the power and spectral metabolite-level SNRs
+            # fid.shape [bS, 2, spec_length] and noise.shape [bS, ..., transients, channels, length]
+            # Power SNR
+            for _ in range(noise_vec.ndim - pSNR.ndim): 
+                pSNR = pSNR.unsqueeze(-3)
+            # print("noise_vec.std(dim=-1, keepdims=True).shape: ",noise_vec.std(dim=-1, keepdims=True).shape)
+            pSNR /= noise_vec.std(dim=-1, keepdims=True).unsqueeze(1)
+            # Spectral SNR
+            for _ in range(noise_vec.ndim - sSNR.ndim): 
+                sSNR = sSNR.unsqueeze(-3)
+            # print("sSNR.dtype: {}; noise_vec.dtype {}".format(sSNR.dtype,noise_vec.dtype))
+            sSNR /= noise_vec.std(dim=-1, keepdims=True).unsqueeze(1)[...,0,:].unsqueeze(-2)
+        else:
+            pSNR = None
+            sSNR = None
 
         # Add the Residual Water and Baselines
         if offsets:
@@ -1627,6 +1602,9 @@ class PhysicsModel(nn.Module):
             # Keep both noisey transients and clean transients
             # output.shape: [bS, ON\OFF, [noisy/clean/clean_filt], transients, channels, length]
             #                    transients, channels, length]
+        else:
+            fidSum = fidSum.unsqueeze(-3)
+            spectral_fit = spectral_fit.unsqueeze(-3)
 
         # Scale with coil senstivities
         if coil_sens:
@@ -1800,7 +1778,7 @@ class PhysicsModel(nn.Module):
         
         if not isinstance(SNR, type(None)):
             for k, v in SNR.items():
-                SNR[k] = v.numpy()
+                SNR[k] = v.numpy() if v.any() else -1
 
         return specSummed.numpy(), spectral_fit.numpy(), baselines, \
                residual_water, params.numpy(), quantities, SNR

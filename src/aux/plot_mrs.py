@@ -85,7 +85,7 @@ N_MET = len(MET_KEYS)
 # ──────────────────────────────────────────────────────────────
 #  I/O helpers
 # ──────────────────────────────────────────────────────────────
-def int_or_str(val: str) -> int | str:
+def int_or_str(val: str):# -> int | str:
     """Runtime conversion function."""
     try:
         return int(val)

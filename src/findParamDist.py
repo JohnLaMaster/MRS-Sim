@@ -12,7 +12,9 @@ from pathlib import Path
 from collections import OrderedDict
 from matplotlib.pyplot import close as plt_close
 from matplotlib.pyplot import savefig as plt_savefig
-from scipy.io import loadmat as ioloadmat
+from scipy.io import loadmat as ioloadmat, savemat as iosavemat
+# from scipy.linalg import eigh
+# from scipy import stats
 # from copy import deepcopy, copy
 
 from fitter import Fitter as Fitter
@@ -21,6 +23,7 @@ from fitter import get_common_distributions, get_distributions
 from types import GeneratorType
 from typing import Tuple, Optional
 
+from aux.aux import calculate_copula_R
 
 sys.path.append('../')
 
@@ -30,7 +33,9 @@ NONNEGATIVE_DIST = [
     "expon", "chi2",
     "halfcauchy", "halflogistic", "halfnorm", "halfgennorm", #"beta"
 ]
+
 TAGS = ['ampl','lorentzLB','freqShift','SNR','ph0','ph1']
+
 
 def loadParams(parameters_path: Optional[str | list | None], ) -> Tuple:
     '''
@@ -235,8 +240,12 @@ def main(args):
     # Check if files already exist and delete
     summary_path = os.path.join(args.savedir, f'summary_of_{args.Nbest}_best_fits.json')
     best_path = os.path.join(args.savedir, 'parameter_distributions_best_fit.json')
-    if os.path.exists(summary_path): os.remove(summary_path)
-    if os.path.exists(best_path): os.remove(best_path)
+    corr_path = os.path.join(args.savedir, 'correlation_matrix.mat')
+    if not args.nofindDist:
+        if os.path.exists(summary_path): os.remove(summary_path)
+        if os.path.exists(best_path): os.remove(best_path)
+    if args.findCorr:
+        if os.path.exists(corr_path): os.remove(corr_path)
     
     def pretty_name(k, met):
         if k == 'ampl':
@@ -256,7 +265,9 @@ def main(args):
             savedir = args.savedir
             ind = np.ones(sample_size, dtype=bool)
 
-        distributions, best = OrderedDict(), OrderedDict()
+        distributions, best, orderedParams = OrderedDict(), OrderedDict(), None
+        print(f'params.keys(): {params.keys()}')
+        print(f'param_keys: {param_keys}')
 
         for k, v in params.items():
             if k not in param_keys:
@@ -270,7 +281,7 @@ def main(args):
             num_vars = v.shape[1]
             # base_key = pretty_name(k)
             
-
+            # if not args.nofindDist:
             for j in range(num_vars):
                 # print(f'params_keys: {k}')
                 if any(token.lower() in k.lower() for token in ["ampl", "lorentzLB", "gaussLB", "SNR"]):
@@ -288,45 +299,60 @@ def main(args):
                 base_key = pretty_name(k, met_name)
 
                 vj = v[:, j:j+1]
+            
+                if not args.nofindDist:
+                    for i, f in enumerate(findDistribution(v=vj, ind=ind, args=args)):
+                        key = base_key
 
-                for i, f in enumerate(findDistribution(v=vj, ind=ind, args=args)):
-                    key = base_key
+                        distributions.update({
+                            key: f.summary(Nbest=args.Nbest, method=args.selectionMetric).to_dict()
+                        })
 
-                    distributions.update({
-                        key: f.summary(Nbest=args.Nbest, method=args.selectionMetric).to_dict()
-                    })
+                        best.update({
+                            key: f.get_best()
+                        })
 
-                    best.update({
-                        key: f.get_best()
-                    })
+                        # base_name = f'{met_name}_{base_key}' if met_name else f'{base_key}'
+                        plt_savefig(savedir + f'{key}.png', dpi=140)
+                        plt_savefig(savedir + f'{key}.eps', dpi=140)
+                        plt_close()
 
-                    # base_name = f'{met_name}_{base_key}' if met_name else f'{base_key}'
-                    plt_savefig(savedir + f'{key}.png', dpi=140)
-                    plt_savefig(savedir + f'{key}.eps', dpi=140)
-                    plt_close()
+                        summary_path = os.path.join(
+                            savedir, f'summary_of_{args.Nbest}_best_fits.json'
+                        )
+                        if os.path.isfile(summary_path):
+                            with open(summary_path, 'r') as file:
+                                existing = json.load(file)
+                            existing.update(distributions)
+                            distributions = existing
+                        with open(summary_path, 'w') as file:
+                            json.dump(distributions, file, indent=4, separators=(',', ': '))
 
-                    summary_path = os.path.join(
-                        savedir, f'summary_of_{args.Nbest}_best_fits.json'
-                    )
-                    if os.path.isfile(summary_path):
-                        with open(summary_path, 'r') as file:
-                            existing = json.load(file)
-                        existing.update(distributions)
-                        distributions = existing
-                    with open(summary_path, 'w') as file:
-                        json.dump(distributions, file, indent=4, separators=(',', ': '))
+                        best_path = os.path.join(savedir, 'parameter_distributions_best_fit.json')
+                        if os.path.isfile(best_path):
+                            with open(best_path, 'r') as file:
+                                existing = json.load(file)
+                            existing.update(best)
+                            best = existing
+                        with open(best_path, 'w') as file:
+                            json.dump(best, file, indent=4, separators=(',', ': '))
 
-                    best_path = os.path.join(savedir, 'parameter_distributions_best_fit.json')
-                    if os.path.isfile(best_path):
-                        with open(best_path, 'r') as file:
-                            existing = json.load(file)
-                        existing.update(best)
-                        best = existing
-                    with open(best_path, 'w') as file:
-                        json.dump(best, file, indent=4, separators=(',', ': '))
-
-                    print(f'Saved summary of fitting parameter distributions at: {summary_path}')
-                    print(f'Saved fitting parameter distributions at: {best_path}')
+                        print(f'Saved summary of fitting parameter distributions at: {summary_path}')
+                        print(f'Saved fitting parameter distributions at: {best_path}')
+            
+                if args.findCorr:
+                    
+                    if isinstance(orderedParams, type(None)):
+                        orderedParams = copy.deepcopy(vj)
+                    else:
+                        orderedParams = np.concatenate([orderedParams, vj], axis=-1)
+        if args.findCorr:
+            print(f'orderedParams.shape: {orderedParams.shape}')
+            # corr = np.corrcoef(orderedParams.T)
+            corr = calculate_copula_R(orderedParams)
+            print(f'corr.shape: {corr.shape}')
+            iosavemat(corr_path, mdict={'corr': corr})
+            print(f'Saved correlation matrix at: {corr_path}')
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
@@ -339,9 +365,11 @@ if __name__=='__main__':
     parser.add_argument('--distributions', type=str, default=None, help='Specify specific distribuions to test for. Possible distributions can be found in the scipy.stats documentation.')
     parser.add_argument('--paramKeys', type=str, default=None, help='Can be used to select specific parameters for analysis.')
     parser.add_argument('--n', type=float, default=-1, help='Percentage of the sample size to test. Results will converge when the sample size is sufficiently large.')
-    parser.add_argument('--nx', type=int, default=5, help='The number of times to resample the dataset and retest the distribution.')
+    parser.add_argument('--nx', type=int, default=1, help='The number of times to resample the dataset and retest the distribution.')
     parser.add_argument('--timeout', type=float, default=30, help='Time limit (sec) for testing a given distribution. Used to cap runtimes.')
     parser.add_argument('--bootstrapping', type=str, default=False, help='Uses bootstrapping to test the distributions.')
+    parser.add_argument('--nofindDist', action='store_true', default=False, help='Uses bootstrapping to test the distributions.')
+    parser.add_argument('--findCorr', action='store_true', default=False, help='Uses bootstrapping to test the distributions.')
     
     args = parser.parse_args()
 

@@ -6,6 +6,7 @@ import json
 
 import numpy as np
 import scipy.io as io
+import scipy.stats as stats
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,7 +25,8 @@ __all__ = ['batch_linspace', 'batch_smooth', 'complex_exp', 'concat_dict',
            'sample_resWater', 'sim2acquired', 'sort_parameters', 
            'torch2numpy', 'unwrap', 'normalize_old', 'loadmat_as_dict', 
            'reorder_metabolite_struct', 'sort_special_fields', '_fftshift', 
-           '_ifftshift', 'npfftshift', 'npifftshift', 'load_parameters']
+           '_ifftshift', 'npfftshift', 'npifftshift', 'load_parameters',
+           'order_metab', 'gaussian_copula_sample', 'calculate_copula_R']
 
 
 PI = torch.from_numpy(np.asarray(np.pi)).squeeze().float()
@@ -645,3 +647,87 @@ def sort_special_fields(fields, prefix):
 
     # sort by numeric value, then by full string to avoid ambiguity
     return sorted(fields, key=lambda x: (extract_number(x), x))
+
+
+def order_metab(
+                metab: list,
+                ) -> tuple:
+    mm_lip, mm, lip, temp, num_mm = [], [], [], [], -1
+    for i, k in enumerate(metab): 
+        if 'mm' in k.lower(): 
+            mm.append(k)
+            temp.append(i)
+            num_mm += 1
+        mm = sorted(mm)
+    mm_lip += mm
+    for i, k in enumerate(metab):
+        if 'lip' in k.lower():
+            lip.append(k)
+            temp.append(i)
+            num_mm += 1
+        lip = sorted(lip)
+    mm_lip += lip
+    temp.reverse()
+    # print('type(metab): ',type(metab))
+    # metab = list(metab)
+    # print('type(metab): ',type(metab))
+    for term in temp: 
+        metab.pop(term)
+    metab = sorted(metab, key=str.casefold)
+
+    if num_mm>-1:
+        return metab + mm_lip, len(metab), num_mm
+    return metab, len(metab), num_mm
+
+def gaussian_copula_sample(n_samples, marginals, R):
+    """
+    Jointly sample from mixed-marginal distributions with a
+    Gaussian copula dependence structure.
+
+    Parameters
+    ----------
+    n_samples   : int
+    marginals   : list of scipy.stats frozen distributions
+    R           : np.ndarray (d, d) — correlation matrix in latent
+                  Gaussian space. Relates to Spearman's rho via
+                  r = 2*sin(pi*rho_s/6) for Gaussian copula.
+
+    Returns
+    -------
+    samples     : np.ndarray (n_samples, d)
+    """
+    d = len(marginals)
+
+    # Step 1: sample latent multivariate Gaussian
+    z = np.random.multivariate_normal(np.zeros(d), R, size=n_samples)
+
+    # Step 2: map to uniform marginals via Phi
+    u = stats.norm.cdf(z)
+
+    # Step 3: apply each marginal's quantile function (PPF)
+    samples = np.column_stack([
+        marginals[i].ppf(u[:, i]) for i in range(d)
+    ])
+
+    return samples
+
+def calculate_copula_R(data):
+    """
+    Calculates the correct latent correlation matrix R for a Gaussian Copula.
+    data: np.array of shape (n_samples, n_features)
+    """
+    n_samples, d = data.shape
+    latent_normals = np.zeros_like(data, dtype=float)
+    
+    for i in range(d):
+        # 1. Map raw data to Uniform(0, 1) using ranks (ECDF)
+        # (Using 'percentile' method to keep bounds strictly between 0 and 1)
+        u = stats.rankdata(data[:, i], method='ordinal') / (n_samples + 1)
+        
+        # 2. Map Uniform(0, 1) to latent standard normal values
+        latent_normals[:, i] = stats.norm.ppf(u)
+        
+    # 3. Compute the correlation matrix of the latent normal space
+    R = np.corrcoef(latent_normals, rowvar=False)
+    
+    return R
