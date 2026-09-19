@@ -1464,6 +1464,7 @@ class PhysicsModel(nn.Module):
                 drop_prob: float=None,
                 presim: dict=None,
                 snr_filter: float=False,
+                return_components: bool=False,
                ) -> torch.Tensor:
         
         if params.ndim==1: params = params.unsqueeze(0) # Allows batchSize = 1
@@ -1638,6 +1639,11 @@ class PhysicsModel(nn.Module):
         else:
             fidSum = fidSum.unsqueeze(-3)
             spectral_fit = spectral_fit.unsqueeze(-3)
+            d = -3  # matches the unsqueeze axis above; generate_noise() is
+                    # the only other place `d` is assigned, and it isn't
+                    # called when noise=False, so `d` must be set here too
+                    # for any code downstream that indexes the (size-1,
+                    # noise-disabled) noisy/clean axis by `d`.
 
         # Scale with coil senstivities
         if coil_sens:
@@ -1778,11 +1784,20 @@ class PhysicsModel(nn.Module):
 
             
         print('>>>>> Compiling spectra')
-        return self.compile_outputs(specSummed, spectral_fit, offsets, params, 
-                                    denom, self.quantify_metab(fid, params, 
-                                                               self.wrt_metab),
-                                    SNR={'power': pSNR, 'spectral': sSNR}
-                                    )
+        quantities = self.quantify_metab(fid, params, self.wrt_metab)
+        SNR = {'power': pSNR, 'spectral': sSNR}
+        if return_components:
+            # v2.0 structured result (handover section 3) -- additive, opt-in
+            # counterpart to compile_outputs()'s legacy positional tuple
+            # below, which every existing caller (mainFcns.simulate(),
+            # sim_COWS.py) continues to use unchanged.
+            return self._compile_result(
+                specSummed=specSummed, spectral_fit=spectral_fit, offsets=offsets,
+                params=params, denom=denom, quantities=quantities, SNR=SNR,
+                noise=noise, noise_vec=noise_vec if noise else None, d=d,
+            )
+        return self.compile_outputs(specSummed, spectral_fit, offsets, params,
+                                    denom, quantities, SNR=SNR)
 
     def compile_outputs(self, 
                         specSummed: torch.Tensor, 
@@ -1811,7 +1826,94 @@ class PhysicsModel(nn.Module):
         
         if not isinstance(SNR, type(None)):
             for k, v in SNR.items():
-                SNR[k] = v.numpy() if v.any() else -1
+                # BUGFIX (v2.0): v is None whenever forward() was called with
+                # noise=False (pSNR/sSNR are only computed inside the `if
+                # noise:` branch) -- v.any() crashed unconditionally in that
+                # case with AttributeError. Found while verifying the
+                # noisy/clean stacking fix.
+                SNR[k] = v.numpy() if (v is not None and v.any()) else -1
 
         return specSummed.numpy(), spectral_fit.numpy(), baselines, \
                residual_water, params.numpy(), quantities, SNR
+
+    def _compile_result(self,
+                        specSummed: torch.Tensor,
+                        spectral_fit: torch.Tensor,
+                        offsets,
+                        params: torch.Tensor,
+                        denom: torch.Tensor,
+                        quantities: dict,
+                        SNR: dict,
+                        noise: bool,
+                        noise_vec,
+                        d: int,
+                       ) -> 'SimulationResult':
+        '''
+        Build the v2.0 structured SimulationResult (handover section 3).
+        Additive counterpart to compile_outputs(): forward(...,
+        return_components=True) calls this instead, forward()'s default
+        (return_components=False) is completely unchanged.
+
+        Keeps torch tensors rather than converting to numpy (unlike
+        compile_outputs()), per the handover doc's "preserve efficient
+        batched PyTorch execution" constraint, and to keep the door open
+        for autograd through this path in the CRLB work (section 6).
+
+        `noise_free_total`/`noisy`/`nuisance_free` are read off the
+        existing noisy/clean stacking axis `d` (see _stack_noisy_clean)
+        rather than recomputed: `spectral_fit`'s clean branch never had
+        baseline/residual water added to it in the first place, so it
+        already *is* the nuisance-free signal -- no new computation is
+        needed for it. See docs/v2/architecture_v1_audit.md section 3.
+        '''
+        from .parameters import ParameterRegistry, SimulationParameters
+        from .simulation_result import SimulationResult
+
+        if offsets:
+            if not isinstance(offsets['baselines'], type(None)):
+                offsets['baselines'], _ = \
+                        self.normalize(offsets['baselines'], denom=denom)
+            if not isinstance(offsets['residual_water'], type(None)):
+                offsets['residual_water'], _ = \
+                        self.normalize(offsets['residual_water'], denom=denom)
+            baseline = offsets.get('baselines')
+            residual_water = offsets.get('residual_water')
+        else:
+            baseline = None
+            residual_water = None
+
+        if noise:
+            noisy = specSummed.select(dim=d, index=0)
+            noise_free_total = specSummed.select(dim=d, index=1)
+            nuisance_free = spectral_fit.select(dim=d, index=1)
+        else:
+            # No noisy/clean split exists when noise is disabled -- both
+            # fidSum and spectral_fit were unsqueezed to a single (size-1)
+            # entry along `d` instead of stacked into two.
+            noisy = None
+            noise_free_total = specSummed.select(dim=d, index=0)
+            nuisance_free = spectral_fit.select(dim=d, index=0)
+
+        realized_snr = None
+        if SNR is not None and (SNR.get('power') is not None or SNR.get('spectral') is not None):
+            realized_snr = SNR
+
+        registry = ParameterRegistry.from_physics_model(self)
+        sim_params = SimulationParameters(tensor=params, registry=registry)
+
+        return SimulationResult(
+            noisy=noisy,
+            noise_free_total=noise_free_total,
+            nuisance_free=nuisance_free,
+            baseline=baseline,
+            residual_water=residual_water,
+            noise=noise_vec,
+            parameters=sim_params,
+            target_snr=params[:, self.index['snr']],
+            realized_snr=realized_snr,
+            quantities=quantities,
+            provenance={
+                'noise_enabled': noise,
+                'offsets_enabled': bool(offsets),
+            },
+        )
