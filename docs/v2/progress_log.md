@@ -308,17 +308,117 @@ synthetic test fixture).
   (still deferred to the relaxation/TE/TR milestone, section 10, as
   originally agreed).
 
+## Milestone 6 — CRLB / Fisher information (commit `b464dbd`)
+
+**Handover section addressed**: 6 (CRLB/FIM).
+
+**Files changed**: `src/crlb.py` (new), `src/physics_model.py`
+(`compute_crlb`/`return_fim` opt-in params on `forward()`, wired through
+`_compile_result()`), `src/simulation_result.py` (`crlb`/`fim`/
+`crlb_labels` fields), `tests/test_crlb.py` (new, 5 tests).
+
+**Design and documented scope**: `compute_crlb()` builds a self-contained,
+differentiable "CRLB forward model" -- a classic MRS-fitting-style
+parametric signal model (per-line complex amplitude, Voigt lineshape,
+per-line frequency shift, global zero-order phase, plus baseline spline
+coefficients as nuisance parameters) -- rather than differentiating
+through `PhysicsModel.forward()`'s entire stochastic generative pipeline.
+This matches how CRLB is done in the MRS literature (e.g. Cavassila et
+al. 2001): B0 field maps, eddy currents, multi-coil combination,
+first-order phase, residual water, and resampling/zero-filling are **not**
+part of this first model and are explicitly out of scope, documented in
+`src/crlb.py`'s module docstring, not silently ignored.
+
+To keep the forward model safe to batch with `torch.func.vmap` (needed for
+an efficient batched Jacobian via `torch.func.jacrev`) -- `PhysicsModel`'s
+own `lineshape_correction`/`frequency_shift`/etc. branch on tensor rank in
+ways that don't reliably survive vmap's tracing -- the Voigt decay and
+amplitude-scaling formulas are short, direct copies of the exact lines in
+`PhysicsModel.lineshape_voigt`/`modulate` (copied from the source at the
+time of writing, not from memory), while frequency shift, phase, and the
+FFT reuse `aux.py`'s `complex_exp`/`Fourier_Transform` directly, since
+those have no rank-branching and are shape-generic.
+
+**Critical validation (not just "it runs")**: before trusting any CRLB
+numbers, verified that this simplified forward model reproduces
+`PhysicsModel.forward()`'s actual output under matching settings (no B0/
+eddy/coil/resample/magnitude, Voigt lineshape, zero baseline). First
+attempt was off by ~4 orders of magnitude; root cause was that the real
+pipeline's returned spectrum is *normalized* (divided by peak magnitude)
+and the first draft wasn't. After adding the same normalization (copied
+from `aux.normalize()`'s formula for a `[2, L]` signal), the two matched to
+**0.18% relative error** (max abs diff 0.0016 against a signal of scale
+0.90) -- consistent with float32 precision, not a structural discrepancy.
+
+**Fisher information / conditioning**: `compute_crlb()` returns `crlb`
+(`[batch, n_params]`, diagonal of the pseudo-inverted FIM) and optionally
+`fim` (`[batch, n_params, n_params]`), plus `crlb_labels` naming each
+dimension using `ParameterRegistry.metabolite_names` (tying in Milestone
+2), satisfying "the parameter registry must identify each CRLB/FIM
+dimension". With cows.json's real 28-metabolite/MM basis set (139 total
+CRLB parameters: 28 lines x 4 [amplitude, d, g, frequency_shift] + phi0 +
+26 spline coefficients), Fisher matrices are, as expected for real
+overlapping MRS spectra, often extremely ill-conditioned (observed
+condition number ~6e19 for one sample) -- producing near-zero or slightly
+negative CRLB entries (floating-point noise around zero, e.g. -1.4e-20)
+for poorly-identified parameters, and occasionally large-magnitude
+positive/negative values for strongly-correlated pairs (e.g. NAA/NAAG,
+whose near-identical chemical shifts make them a textbook
+poorly-separable pair in MRS fitting). This is expected/documented
+behavior in the CRLB literature, not a bug -- `compute_crlb()`'s docstring
+explains how to interpret it and exposes a `rcond` parameter for the
+pseudo-inverse rather than silently clamping or hiding it.
+
+**Wiring**: `forward(..., return_components=True, compute_crlb=True,
+return_fim=False)` -- both new flags default to `False`, matching the
+handover doc's "should be disabled by default for expensive DL training".
+`compute_crlb=True` with `noise=False` raises a clear `ValueError` (CRLB
+needs a noise covariance, which doesn't exist when noise is disabled)
+rather than silently returning nonsense.
+
+**Behavior changes**: none to any existing call path (both flags default
+to `False`, and are only consulted inside the already-opt-in
+`return_components=True` branch).
+
+**Assumptions resolved**: none new.
+
+**Tests**: 5 new unit tests (`test_crlb.py`) covering the parameter-layout
+bookkeeping, the Voigt-decay formula matching its source, forward-model
+output shape/finiteness, `vmap`+`jacrev` batching/differentiability, and a
+zero-amplitude sanity case. `compute_crlb()` itself (needs a real
+PhysicsModel) was verified end to end against `cows.json`'s real basis
+set: the 0.18% forward-model validation above, correct output shapes,
+FIM symmetry, registry-based labels resolving to real metabolite names,
+and the `noise=False` error path.
+
+**Remaining/follow-up**:
+- The CRLB model's scope (no B0/eddy/coil/first-order-phase/residual-water/
+  resampling) is a real, documented limitation, not a placeholder --
+  extending it is future work, likely alongside whichever handover
+  sections touch those components more deeply (10, 11, 12).
+- No automatic zero-fill-aware masking is wired up yet (the `mask`
+  parameter exists and is documented, but nothing currently populates it
+  from a real zero-filled config) -- consistent with `zero_fill()` itself
+  being separately flagged as broken in the architecture audit.
+- CRLB is computed independently per forward() call; no caching/reuse
+  across repeated calls with the same basis set (not needed yet at this
+  scale, flagged in case it matters for larger basis sets later).
+
 ## Not yet started
 
-Handover sections 5 (baseline spline fitting), 6 (CRLB/FIM), 7 (SNR audit/
-formalization), 8 (parameter replay across basis sets), 9 (provenance), 10
-(relaxation/TE/TR, including the agreed `V1_0` legacy-broadening flag), 11
-(basis-set metadata / double-application audit), 12 (NIfTI-MRS export
-audit), 13 (broader test-suite expansion beyond what's landed alongside
-sections 1-4).
+Handover sections 7 (SNR audit/formalization), 8 (parameter replay across
+basis sets), 9 (provenance), 10 (relaxation/TE/TR, including the agreed
+`V1_0` legacy-broadening flag), 11 (basis-set metadata / double-application
+audit), 12 (NIfTI-MRS export audit), 13 (broader test-suite expansion
+beyond what's landed alongside sections 1-6).
 
 Sections 3 (component outputs) and 4 (nuisance removal) are done for what
 the current pipeline already computes (Milestone 5), but per-component
 skip-to-save-memory/compute is deferred, and the `presim` validation gap
 and baseline/residual-water ppm-grid alignment question (both noted above)
 remain open.
+
+Sections 5 (baseline spline fitting) and 6 (CRLB/FIM) are done (Milestones
+6 covers CRLB; splines landed in the commit just before it) within the
+documented scope noted above -- CRLB does not yet model B0/eddy currents/
+multi-coil/first-order phase/residual water/resampling.
