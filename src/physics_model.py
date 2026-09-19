@@ -447,7 +447,28 @@ class PhysicsModel(nn.Module):
                 # print(i, m, num_mets, i-num_mets, header[i-num_mets])
                 met = header[i-num_mets]
                 try:
-                    temp = self.ranges[met.lower()]['T2']['metab']
+                    t2 = self.ranges[met.lower()]['T2']['metab']
+                    # BUGFIX (v2.0): 'd' is a Lorentzian decay RATE applied
+                    # as exp(-d * self.t), with self.t in SECONDS (verified
+                    # directly: self.t's range matches Ns/spectralwidth,
+                    # e.g. ~0.68s for a typical config) -- but T2.metab's
+                    # min/max are literally T2 relaxation times in
+                    # MILLISECONDS (e.g. NAA: 242.7-320.17). Using those
+                    # values directly as 'd' (as this branch did before)
+                    # made every sampled decay rate ~1000x too large,
+                    # decaying the FID to ~0 within microseconds instead of
+                    # over the actual readout window -- effectively erasing
+                    # every metabolite sampled through this default range
+                    # (the copula-based sampler in sim_COWS.py bypasses
+                    # this entirely by setting 'd' from real fitted
+                    # in-vivo values, which is presumably why this had gone
+                    # unnoticed). Convert to a proper decay-rate range
+                    # (rate = 1000 / T2_ms, i.e. 1/T2 in seconds); a larger
+                    # T2 (slower decay) correctly maps to a smaller rate,
+                    # so min/max invert.
+                    t2_min_ms = t2['min'][0] if isinstance(t2['min'], (list, tuple)) else t2['min']
+                    t2_max_ms = t2['max'][0] if isinstance(t2['max'], (list, tuple)) else t2['max']
+                    temp = {'min': 1000.0 / t2_max_ms, 'max': 1000.0 / t2_min_ms}
                 except:
                     temp = {}
                     temp['min'] = 0
