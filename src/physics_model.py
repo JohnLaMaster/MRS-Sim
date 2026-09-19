@@ -1642,16 +1642,32 @@ class PhysicsModel(nn.Module):
             
             # Calculating the power and spectral metabolite-level SNRs
             # fid.shape [bS, 2, spec_length] and noise.shape [bS, ..., transients, channels, length]
-            # Power SNR
-            for _ in range(noise_vec.ndim - pSNR.ndim): 
-                pSNR = pSNR.unsqueeze(-3)
-            # print("noise_vec.std(dim=-1, keepdims=True).shape: ",noise_vec.std(dim=-1, keepdims=True).shape)
-            pSNR /= noise_vec.std(dim=-1, keepdims=True).unsqueeze(1)
-            # Spectral SNR
-            for _ in range(noise_vec.ndim - sSNR.ndim): 
-                sSNR = sSNR.unsqueeze(-3)
-            # print("sSNR.dtype: {}; noise_vec.dtype {}".format(sSNR.dtype,noise_vec.dtype))
-            sSNR /= noise_vec.std(dim=-1, keepdims=True).unsqueeze(1)[...,0,:].unsqueeze(-2)
+            # BUGFIX (v2.0): pSNR/sSNR are per-metabolite-line reference
+            # values (shape [bS, num_bF, channels, 1]) with no transients
+            # axis. The old code unconditionally did
+            # `noise_vec.std(...).unsqueeze(1)`, assuming pSNR/sSNR always
+            # had exactly one fewer dim than noise_vec at a transients-
+            # shaped position -- true for the single-coil case (noise_vec
+            # is 3-D, one fewer than pSNR's 4-D, so the unsqueeze loop
+            # above is a no-op and this still lines up), but not for
+            # multicoil (noise_vec is 4-D, *same* ndim as pSNR, so the
+            # per-metabolite axis (num_bF) collided with noise_vec's
+            # transients axis during broadcasting -- a hard crash,
+            # reproduced independently of anything else in this refactor).
+            # Fixed by explicitly inserting a transients axis into pSNR/
+            # sSNR only when noise_vec actually has one, rather than a
+            # blanket `.unsqueeze(1)`.
+            has_transients_axis = noise_vec.ndim > 3
+            noise_std = noise_vec.std(dim=-1, keepdims=True)
+            if has_transients_axis:
+                pSNR = pSNR.unsqueeze(1) / noise_std.unsqueeze(2)
+            else:
+                pSNR = pSNR / noise_std.unsqueeze(1)
+            # Spectral SNR (same fix as pSNR above, for the same reason)
+            if has_transients_axis:
+                sSNR = sSNR.unsqueeze(1) / noise_std.unsqueeze(2)[...,0,:].unsqueeze(-2)
+            else:
+                sSNR = sSNR / noise_std.unsqueeze(1)[...,0,:].unsqueeze(-2)
         else:
             pSNR = None
             sSNR = None
