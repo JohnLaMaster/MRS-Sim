@@ -794,6 +794,38 @@ broader/more thorough multicoil test pass later (edge cases: different
 transient counts, combined with baseline/residual water, etc.) since this
 path had apparently gone untested for a while.
 
+## Milestone 12 — pSNR/sSNR regression tests + V1_0 flag (commits `5a5a0c2`, `1f1cdae`)
+
+Quick session (repo owner had ~20 minutes before disconnecting).
+
+**Tests for Milestone 11**: extracted the pSNR-scaling fix into a static,
+directly-testable `PhysicsModel._scale_snr_reference()`. 2 new tests
+(single-coil pinning existing behavior; multicoil with distinct
+per-transient noise values, confirming correct per-transient division and
+regression-testing the exact crash). Re-verified end to end against
+`cows.json` with `num_coils=3` after the refactor.
+
+**`V1_0` flag** (handover section 10 prep, agreed with the repo owner
+early in this refactor, implemented now): `PhysicsModel.initialize(...,
+V1_0=True)` gates the confirmed double-broadening bug
+(architecture_v1_audit.md sections 6/11) -- default `True` preserves it
+exactly for backward compatibility; `V1_0=False` omits it, with nothing
+yet added in its place (the actual relaxation/TE/TR modeling that would
+replace it is separate, unimplemented work). Wired into
+`mainFcns.prepare()` via an optional config field, defaulting to `True`
+via `getattr` when absent. Verified: `V1_0=True`/`False` produce
+genuinely different basis FIDs (max abs diff ~14) against `cows.json`'s
+real basis set; existing configs (no `V1_0` field) unaffected.
+
+**New, minor, unrelated finding (not fixed)**: `order_metab()` mutates its
+input metabolite list in place (`list.pop()`). Only matters if constructing
+multiple `PhysicsModel`s from one shared list object directly --
+`mainFcns.prepare()` is unaffected (loads a fresh list from JSON each
+call).
+
+Full suite: 84/84 passing. Committed to a clean state before the repo
+owner disconnected (push is theirs to do, per their standing preference).
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across
