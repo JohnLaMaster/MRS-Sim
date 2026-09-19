@@ -265,7 +265,7 @@ def main(args):
             savedir = args.savedir
             ind = np.ones(sample_size, dtype=bool)
 
-        distributions, best, orderedParams = OrderedDict(), OrderedDict(), None
+        distributions, best, orderedParams, orderedNames = OrderedDict(), OrderedDict(), None, []
         print(f'params.keys(): {params.keys()}')
         print(f'param_keys: {param_keys}')
 
@@ -341,17 +341,28 @@ def main(args):
                         print(f'Saved fitting parameter distributions at: {best_path}')
             
                 if args.findCorr:
-                    
+
                     if isinstance(orderedParams, type(None)):
                         orderedParams = copy.deepcopy(vj)
                     else:
                         orderedParams = np.concatenate([orderedParams, vj], axis=-1)
+                    orderedNames.append(base_key)
         if args.findCorr:
             print(f'orderedParams.shape: {orderedParams.shape}')
             # corr = np.corrcoef(orderedParams.T)
             corr = calculate_copula_R(orderedParams)
             print(f'corr.shape: {corr.shape}')
-            iosavemat(corr_path, mdict={'corr': corr})
+            # `names` records the exact variable each row/column of `corr`
+            # corresponds to, in order. Without this, downstream consumers
+            # (e.g. sample_from_fitted_dist.sample_from_copula) have no way
+            # to verify their distributions JSON's key order still matches
+            # this matrix's row/column order -- which silently drifts if the
+            # JSON was accumulated across multiple findParamDist.py runs
+            # (dict.update() keeps each key's original position) while the
+            # matrix is always recomputed fresh in the current run's order.
+            # See src/sampling.py's CopulaInVivoSampler, which aligns by name
+            # using this field instead of trusting positional order.
+            iosavemat(corr_path, mdict={'corr': corr, 'names': np.array(orderedNames, dtype=object)})
             print(f'Saved correlation matrix at: {corr_path}')
 
 if __name__=='__main__':
