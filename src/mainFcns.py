@@ -23,6 +23,12 @@ def prepare(config_file):
     parameters = config["parameters"] if "parameters" in confg_kys else None
     resWater_cfg = config["resWater_cfg"] if "resWater_cfg" in confg_kys else None
     baseline_cfg = config["baseline_cfg"] if "baseline_cfg" in confg_kys else None
+    # v2.0 (handover section 18 prep): optional per-metabolite overrides of
+    # src/basis_sets/metabolites_database.json's Conc/T2.metab/T2.spins/
+    # omega defaults, using the database's own nested shape -- see
+    # src/metabolite_database.py and PhysicsModel.__init__(). Absent by
+    # default, so existing configs are unaffected.
+    database_overrides = config["metabolite_database_overrides"] if "metabolite_database_overrides" in confg_kys else None
 
     config = SimpleNamespace(**config)
     p = 1 - config.drop_prob # probability of including a variable for a given data sample
@@ -30,7 +36,8 @@ def prepare(config_file):
 
     # Define and initialize the physics model
     pm = PhysicsModel(PM_basis_set=config.PM_basis_set,
-                      TE=config.TE)
+                      TE=config.TE,
+                      database_overrides=database_overrides)
     pm.initialize(metab=config.metabolites, 
                   basisFcn_len=config.basis_fcn_length,
                   b0=config.b0,
@@ -124,6 +131,8 @@ def simulate(inputs, args=None):
     counter = 0
     for i in range(0,config.totalEntries,step):
         n = i+step if i+step<=params.shape[0] else i+(params.shape[0])
+        # b = sample_baselines(n-i, **baseline_cfg)
+        # print(f'type(b): {type(b)}')
         outputs = pm.forward(params=params[i:n,:], 
                              diff_edit=None,
                              b0=config.b0,

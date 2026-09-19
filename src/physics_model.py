@@ -31,9 +31,10 @@ gamma_p = torch.as_tensor(42.577478518)
 
 # @torch.no_grad()
 class PhysicsModel(nn.Module):
-    def __init__(self, 
+    def __init__(self,
                  PM_basis_set: str,
                  TE: int,
+                 database_overrides: dict = None,
                 ):
         super().__init__()
         # Load basis spectra, concentration ranges, and units
@@ -50,22 +51,34 @@ class PhysicsModel(nn.Module):
                 if path.endswith('.mat'):
                     dct = convertdict(io.loadmat(file,simplify_cells=True))
                     for key, value in dct.items():
-                        if str(key)=='metabolites': 
+                        if str(key)=='metabolites':
                             self.basisFcns['metabolites'] = value
-                        elif str(key)=='artifacts': 
+                        elif str(key)=='artifacts':
                             self.basisFcns['artifacts'] = value
                         elif str(key)=='header':
                             self.header = value
                             for k, v in dct[key].items():
-                                if str(k)=='ppm': 
+                                if str(k)=='ppm':
                                     k, v = '_ppm', v
-                                if not isinstance(v, str): 
+                                if not isinstance(v, str):
                                     self.register_buffer(str(k), v.float())
                         elif str(key)=='ranges':
                             self.ranges = value
                 elif path.endswith('.json'):
                     self.ranges = json.load(file)
-                    
+
+        # v2.0 (handover section 18 prep): let a config override specific
+        # metabolite_database.json entries (Conc, T2.metab, T2.spins,
+        # omega) without needing to edit the database file itself or
+        # duplicate the whole per-metabolite entry. Uses the database's
+        # own nested shape, e.g. {"naa": {"Conc": {"min": [0.05], "max":
+        # [2.0]}}} -- see src/metabolite_database.py. This is additive: a
+        # config with no override for a given metabolite/field falls
+        # through to the database's existing value exactly as before.
+        if database_overrides:
+            from .metabolite_database import apply_range_overrides
+            self.ranges = apply_range_overrides(self.ranges, database_overrides)
+
                     # mets = dct.keys()
                     # for m in mets:
                     #     temp = {m: {}}
