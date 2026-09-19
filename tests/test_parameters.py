@@ -163,3 +163,36 @@ def test_contains():
     assert 'snr' in params
     assert 'NAA' in params
     assert 'not_a_real_parameter' not in params
+
+
+def test_save_and_load_roundtrip(tmp_path):
+    params = make_params(batch_size=5)
+    path = tmp_path / 'params.pt'
+    params.save(str(path))
+
+    loaded = SimulationParameters.load(str(path))
+    torch.testing.assert_close(loaded.tensor, params.tensor)
+    assert loaded.registry.index == params.registry.index
+    assert loaded.registry.metabolite_names == params.registry.metabolite_names
+    # The loaded registry is a fresh object (not the same instance), but
+    # behaves identically -- nested access should work the same way.
+    torch.testing.assert_close(loaded['naa']['concentration'], params['naa']['concentration'])
+
+
+def test_save_and_load_preserves_baseline_and_metadata(tmp_path):
+    tensor = torch.rand(3, N_COLUMNS)
+    registry = ParameterRegistry(index=INDEX, metabolite_names=METABOLITE_NAMES)
+    params = SimulationParameters(
+        tensor=tensor,
+        registry=registry,
+        baseline={'start': torch.zeros(3, 1, 1), 'length': 128},
+        metadata={'sampler': 'UniformRangeSampler', 'seed': 7},
+    )
+    path = tmp_path / 'params_with_baseline.pt'
+    params.save(str(path))
+
+    loaded = SimulationParameters.load(str(path))
+    torch.testing.assert_close(loaded.baseline['start'], params.baseline['start'])
+    assert loaded.baseline['length'] == 128
+    assert loaded.metadata == {'sampler': 'UniformRangeSampler', 'seed': 7}
+    assert loaded.residual_water is None

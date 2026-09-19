@@ -18,6 +18,24 @@ represented in ``PhysicsModel.index``. ``SimulationParameters`` carries them
 alongside the tensor so that a full simulation's parameters can be inspected,
 saved, and replayed as one object, without forcing them into the physical
 model's column layout.
+
+Parameter replay (handover section 8): ``SimulationParameters.tensor`` is a
+plain tensor with no reference back to any particular ``PhysicsModel``
+instance, so it is already portable across model instances (including
+different basis sets) by construction -- the only requirement is that the
+target ``PhysicsModel`` was initialized with a *compatible* parameter
+layout (same metabolite list/order, same optional components enabled,
+i.e. the same ``ind``/registry structure). ``save()``/``load()`` persist a
+``SimulationParameters`` (including its registry) to/from disk for reuse
+across sessions or processes; verified directly, calling ``forward()`` on
+two independently-constructed ``PhysicsModel`` instances built from the
+same config with the identical ``params.tensor`` produces identical
+output (see docs/v2/progress_log.md, Milestone 9). Passing a tensor
+sampled for an incompatible layout raises an ordinary shape-mismatch
+error inside ``forward()``'s tensor operations, not a silent
+misalignment -- there is no additional compatibility-checking layer here
+by design (per "use clear error messages for incompatible
+configurations" rather than adding a heavyweight new abstraction for it).
 """
 from __future__ import annotations
 
@@ -254,4 +272,51 @@ class SimulationParameters:
             baseline=_clone_dict(self.baseline),
             residual_water=_clone_dict(self.residual_water),
             metadata=dict(self.metadata),
+        )
+
+    def save(self, path: str) -> None:
+        """
+        Save to disk for exact replay later (handover section 8: "exact
+        sampled-parameter replay is the primary reproducibility mechanism;
+        seeds are secondary"). Serializes the registry's index/metabolite
+        names alongside the tensor, so `load()` does not need the original
+        PhysicsModel instance -- only a *compatible* one (same metabolite
+        list/order) to call `forward()` on again; see `load()`.
+        """
+        torch.save({
+            'tensor': self.tensor,
+            'registry_index': self.registry.index,
+            'registry_metabolite_names': self.registry.metabolite_names,
+            'baseline': self.baseline,
+            'residual_water': self.residual_water,
+            'metadata': self.metadata,
+        }, path)
+
+    @classmethod
+    def load(cls, path: str) -> 'SimulationParameters':
+        """
+        Load parameters saved by `save()`. The returned object's
+        `.tensor` can be passed to any `PhysicsModel.forward()` whose
+        parameter layout matches (same metabolite list/order and enabled
+        components) -- see the module docstring's note on cross-basis-set
+        replay. A layout mismatch surfaces as an ordinary shape-mismatch
+        error inside `forward()`'s tensor operations, not a silent
+        misalignment.
+
+        Note: uses `torch.load(..., weights_only=False)` since a saved
+        file contains plain Python dicts/lists (the registry index/names),
+        not just tensors. Only load files you trust, exactly as with any
+        other `torch.load` call on non-weights-only data.
+        """
+        data = torch.load(path, weights_only=False)
+        registry = ParameterRegistry(
+            index=data['registry_index'],
+            metabolite_names=data['registry_metabolite_names'],
+        )
+        return cls(
+            tensor=data['tensor'],
+            registry=registry,
+            baseline=data.get('baseline'),
+            residual_water=data.get('residual_water'),
+            metadata=data.get('metadata', {}),
         )
