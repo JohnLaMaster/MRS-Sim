@@ -201,12 +201,124 @@ configurations" constraint. `compile_outputs()` also crashes when
 `.any()` called on it -- found incidentally while verifying the noise-leak
 fix, not yet fixed, tracked here for when sections 3/4 land.
 
+## Milestone 5 — Structured component outputs + nuisance removal (commit `3f49448`)
+
+**Handover sections addressed**: 3 (forward-sim component outputs) and 4
+(nuisance-component removal).
+
+**Files changed**: `src/simulation_result.py` (new), `src/nuisance.py`
+(new), `src/physics_model.py` (additive `return_components=True` path plus
+two more small bugfixes), `tests/test_simulation_result.py` (new, 3
+tests), `tests/test_nuisance.py` (new, 7 tests).
+
+**Design**: `forward(..., return_components=True)` is a fully additive,
+opt-in alternative return path -- `compile_outputs()`'s legacy positional
+tuple is completely unchanged and is still what `mainFcns.simulate()`/
+`sim_COWS.py` use. The key simplification: `spectral_fit`'s "clean" branch
+already *is* the nuisance-free signal (baseline/residual water are only
+ever added to `fidSum`), so `nuisance_free` needed exposing under that
+name, not new computation. `SimulationResult` bundles this with
+`noisy`/`noise_free_total`/`baseline`/`residual_water`/`noise`/
+`parameters` (a `SimulationParameters`, tying in Milestone 2's registry)/
+`target_snr`/`realized_snr`/`quantities`, plus explicit `None` placeholders
+for `baseline_fit`/`spline_coefficients` (section 5) and `crlb`/`fim`
+(section 6) so callers can tell "not computed yet" from "field doesn't
+exist".
+
+**Axis resolution (important correction to my own reasoning, not to
+committed code)**: while verifying the Milestone 4 noise-leak fix, an
+end-to-end cross-seed test gave a confusing result suggesting the wrong
+axis held the noisy/clean split. Root cause: with baseline/residual-water
+enabled, `bounded_random_walk`'s internal randomness (and `rand_omit`'s,
+even at `drop_prob=0`) also consumes torch's global RNG on every
+`forward()` call, so changing `torch.manual_seed` changes more than just
+the noise realization -- confounding that comparison. Re-tested with
+baselines/residual-water fully disabled (noise as the only randomness
+source) and got a clean, unambiguous result: axis 1, index 0 = noisy,
+index 1 = clean, exactly matching `generate_noise()`'s `d` variable (which
+Milestone 4's fix already used correctly). No code changed as a result of
+this, only my own earlier uncertainty resolved -- noted here since it's a
+good illustration of why the handover doc's "do not rely on global RNG
+state" requirement matters even outside the sampler itself.
+
+**Bugs fixed incidentally while building this**:
+1. `forward()`'s no-noise branch never assigned `d` (only `generate_noise()`
+   did, which isn't called when `noise=False`) -- added `d = -3` there,
+   matching the hardcoded axis the unsqueeze already used.
+2. `compile_outputs()` crashed whenever `noise=False`, since
+   `SNR={'power': None, 'spectral': None}` still called `.any()` on `None`.
+   Fixed to check for `None` first.
+
+**Nuisance removal (section 4)**: `remove_nuisance()` (trivial subtraction,
+used internally and directly usable on a live `SimulationResult`) and
+`remove_nuisance_from_saved()` (path-based, from a `mainFcns._save()`
+`.mat` file). The path-based function has a **measured, documented
+limitation**: reconstructing nuisance-free by subtracting saved baseline/
+residual-water from the saved spectrum does not exactly match the true
+nuisance-free signal. Measured directly against `cows.json`'s real basis
+set (identical seed/parameters, comparing to a live `SimulationResult`):
+**max absolute error 0.64 against a signal with max absolute value 0.99 --
+a ~65% relative error**, not numerical noise. Most likely cause (not fully
+confirmed): `baseline_cfg`/`resWater_cfg` each resample onto their own
+internal ppm range (`cows.json`: `[-1.6, 6]` / `[4.4, 4.85]`) rather than
+the main spectrum's `cropRange` (`[0.2, 4.2]`), and it wasn't confirmed
+these end up aligned by the time they're saved. This is a real, open
+architectural question, not a bug in the new `nuisance.py` code itself
+(which was verified to correctly read/reconstruct from the real saved
+file format -- the discrepancy is inherent to what gets saved). Use
+`SimulationResult.nuisance_free` (the "during simulation" path) whenever
+exactness matters; it has no such gap.
+
+**Also found, not fixed here (bug in my own first draft, fixed before
+committing)**: `scipy.io.savemat`/`loadmat` silently squeezes a saved
+array's size-1 axis on round-trip (verified directly: a `(4,1,2,16)` array
+loads back as `(4,2,16)`). My first `remove_nuisance_from_saved()` draft
+assumed the size-1 axis would still be there and indexed it explicitly,
+which crashed against both my own test fixture and a real saved dataset.
+Fixed to detect and handle both cases.
+
+**Behavior changes**: none to any existing call path (`return_components`
+defaults to `False`). Within the new path only: `compile_outputs()`'s
+`noise=False` crash fix means that combination is now usable at all
+(previously always raised).
+
+**Assumptions resolved**: none new.
+
+**Tests**: 10 new unit tests. Full suite: 36/36 passing. End-to-end
+verified against `cows.json`'s real basis set: `return_components=True`
+output shapes/values/types (including `result.parameters['naa']
+['concentration']` nested access working end to end), the noisy/clean
+axis resolution, and the exact `remove_nuisance_from_saved()` accuracy
+numbers above (via a real `mainFcns._save()` round trip, not just the
+synthetic test fixture).
+
+**Remaining/follow-up**:
+- The `presim` type-validation gap noted in Milestone 4 is still open
+  (still silently misbehaves on non-`None`, non-tensor input).
+- `return_components=True` does not yet support skipping individual
+  components' computation to save memory/compute (the handover doc asks
+  for this) -- everything it exposes was already being computed by the
+  existing pipeline regardless, so this milestone only had to expose it,
+  not add new optional compute paths. True skip-to-save-memory support is
+  deferred.
+- The baseline/residual-water ppm-grid alignment question above is a real
+  open item, likely relevant to the section 5 (baseline spline fitting)
+  and section 11 (basis-set/grid metadata audit) work.
+- `SimulationResult` does not yet carry the `V1_0` legacy-broadening flag
+  (still deferred to the relaxation/TE/TR milestone, section 10, as
+  originally agreed).
+
 ## Not yet started
 
-Handover sections 3 (forward-sim component outputs/toggles), 4 (nuisance
-removal), 5 (baseline spline fitting), 6 (CRLB/FIM), 7 (SNR audit/
+Handover sections 5 (baseline spline fitting), 6 (CRLB/FIM), 7 (SNR audit/
 formalization), 8 (parameter replay across basis sets), 9 (provenance), 10
 (relaxation/TE/TR, including the agreed `V1_0` legacy-broadening flag), 11
 (basis-set metadata / double-application audit), 12 (NIfTI-MRS export
 audit), 13 (broader test-suite expansion beyond what's landed alongside
-sections 1-2).
+sections 1-4).
+
+Sections 3 (component outputs) and 4 (nuisance removal) are done for what
+the current pipeline already computes (Milestone 5), but per-component
+skip-to-save-memory/compute is deferred, and the `presim` validation gap
+and baseline/residual-water ppm-grid alignment question (both noted above)
+remain open.
