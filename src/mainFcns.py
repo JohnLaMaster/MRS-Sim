@@ -57,7 +57,14 @@ def prepare(config_file):
                   spectralwidth=config.spectralwidth,
                 #   snr_metab=config.snr_metab,
                   wrt_metab=config.wrt_metab,
-                  snr_metab=config.snr_metab,)
+                  snr_metab=config.snr_metab,
+                  # V1_0 (default True): preserves the unconditional
+                  # double-broadening behavior for backward compatibility
+                  # with existing v1-generated datasets; set to false in a
+                  # config to use the corrected behavior. See
+                  # PhysicsModel.initialize()'s docstring/comment and
+                  # docs/v2/progress_log.md.
+                  V1_0=getattr(config, 'V1_0', True),)
     config.header = pm.header
 
     # print(pm.index)

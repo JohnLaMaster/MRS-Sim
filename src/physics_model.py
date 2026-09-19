@@ -151,8 +151,9 @@ class PhysicsModel(nn.Module):
                    ppm_ref: float=4.65,
                    spectral_resolution: list=[10.0, 10.0, 10.0], # mm
                    spectralwidth=None,
-                   wrt_metab: str='PCr', 
+                   wrt_metab: str='PCr',
                    snr_metab: str=None,
+                   V1_0: bool=True,
                   ) -> tuple:
         # # Sort metabs and group met vs mm/lip
         # print('PM.intialize.metab: ',metab) # correct
@@ -218,10 +219,25 @@ class PhysicsModel(nn.Module):
             num_lines *= self._num_spins
 
 
-        # if self.linewidth==0:
-        lw = 1# - self.linewidth
-        broaden = torch.exp(-lw*self.t).unsqueeze(-2).unsqueeze(0)
-        self.syn_basis_fids *= broaden.expand_as(self.syn_basis_fids)
+        # V1_0 (default True): preserves an unconditional exp(-t) decay
+        # applied to every basis FID at load time -- on top of whatever
+        # T2/linewidth decay the basis-set software already baked in, and
+        # on top of the per-sample sampled 'd'/'g' broadening applied
+        # later in lineshape_correction(). This is a confirmed double-
+        # application of broadening (see docs/v2/architecture_v1_audit.md
+        # section 6/11 and docs/v2/progress_log.md), kept as the default
+        # for exact backward compatibility with existing v1-generated
+        # datasets/trained models, per the repo owner's explicit request.
+        # Set V1_0=False for the corrected behavior (no extra broadening
+        # beyond what's explicitly modeled) once relaxation/TE/TR handling
+        # (handover section 10) is implemented -- until then, V1_0=False
+        # simply omits this unconditional decay with nothing yet added in
+        # its place.
+        self.V1_0 = V1_0
+        if V1_0:
+            lw = 1
+            broaden = torch.exp(-lw*self.t).unsqueeze(-2).unsqueeze(0)
+            self.syn_basis_fids *= broaden.expand_as(self.syn_basis_fids)
 
         '''
         if difference_editing:
