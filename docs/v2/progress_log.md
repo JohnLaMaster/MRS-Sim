@@ -404,13 +404,255 @@ and the `noise=False` error path.
   across repeated calls with the same basis set (not needed yet at this
   scale, flagged in case it matters for larger basis sets later).
 
+## Milestone 8 — CRITICAL: noisy output was built from the wrong batch sample (commit `f573f9c`)
+
+**Found while working on**: section 8 (parameter replay) -- a
+batch_size>1 replay test surfaced this; it is not itself a replay feature.
+
+**The bug**: whenever `noise=True` and `multicoil<=1` (single coil -- the
+common case for every config file in this repo), **every sample's "noisy"
+spectrum in a batch was silently built from batch sample 0's clean
+signal, not its own.** Verified directly against `cows.json`'s real basis
+set with `batch_size=5`: for every sample `i != 0`, its noisy output
+correlated 0.9999+ with sample 0's clean spectrum and only ~0.92 with its
+own. This is about as severe a correctness bug as this codebase could
+have -- it corrupts the primary output (the actual training spectrum)
+for what is very likely the overwhelmingly common real usage pattern
+(batched simulation, single coil, noise enabled).
+
+**Who was actually affected**: unclear how far back this goes or which
+existing datasets it touches -- flagged here rather than guessed.
+`sim_COWS.py`'s committed version hardcodes `totalEntries = 1` right
+before returning from `sample()`, which forces `batch_size=1` for any
+COWS-generated dataset regardless of what `cows.json`'s own
+`"totalEntries"` field says -- at `batch_size=1` there is no "sample 0
+vs sample i" distinction, so COWS datasets generated through the
+committed pipeline should not have been affected by this specific bug.
+`mrs-sim_template.py`/`deep_learning_dataset_template.py`-style usage
+with a real batch size would have been.
+
+**Root cause**: the noise-stacking code
+(`fidSum[...,0,:,:].clone().unsqueeze(-3) + noise_vec`, both in the
+original code and in the shared `_stack_noisy_clean()` helper this
+refactor extracted from it in Milestone 4/commit `e244695`) is only
+correct when `signal` already has a transients axis at position -3
+(shape `[bS, transients, channels, L]`, produced by `multicoil()` when
+`multicoil > 1`) -- the ellipsis then consumes exactly the batch
+dimension, and `,0,` picks transient 0 *per sample*. When no transients
+axis exists (`multicoil <= 1`, `signal` is `[bS, channels, L]`), the same
+indexing pattern has one dimension too few for the ellipsis to skip the
+batch axis, so it silently indexed the **batch** axis instead of a
+per-sample axis. This predates this refactor entirely; Milestone 4's own
+verification of `_stack_noisy_clean()` happened to compare across noise
+seeds on the same batch (not sample-to-sample), which is why it didn't
+surface this.
+
+**Fix**: `_stack_noisy_clean()` now takes an explicit
+`has_transients_axis` argument (`multicoil > 1` in `forward()`) instead
+of inferring the presence of a transients axis from `signal`'s shape --
+shape-inference under-specified assumption was exactly the cause. When
+false, noise is added directly to the sample's own full signal (no
+slicing). Output tensor shapes are unchanged in both branches; only which
+data feeds the noisy branch's per-sample content changed. The repo owner
+explicitly considered and asked about a more sweeping alternative (always
+unconditionally add a transients axis, everywhere) -- noted below as a
+deliberate follow-up question, not adopted here because it would change
+output tensor rank (5D even for single-coil) and break `mainFcns._save()`'s
+format, NIfTI export, and `plot_mrs.py`'s shape assumptions; this fix was
+kept minimal and shape-preserving instead.
+
+**A related, smaller issue found in the same investigation**:
+`SimulationResult.noise` was on a different numerical scale than
+`.noisy`/`.noise_free_total` (captured before vs. after the final
+`normalize()` call), so `noisy == noise_free_total + noise` didn't hold
+even after the main fix, until `noise_vec` was also divided by the same
+per-sample normalization `denom` before being returned. Fixed in the same
+commit.
+
+**Verification** (against `cows.json`'s real basis set unless noted):
+- `batch_size=5`, single coil: every sample's noisy output now correlates
+  ~1.0 with its own clean signal.
+- `noisy == noise_free_total + noise` holds to ~6e-8 relative precision
+  for every sample, including a near-zero-SNR sample that had previously
+  shown spurious large errors from unrelated numerical instability
+  (dividing by near-zero noise) during debugging -- worth remembering:
+  ratio-based checks (`diff / noise`) are unreliable near-zero noise;
+  absolute-difference-vs-signal-scale checks are not.
+- The `has_transients_axis=True` (multicoil) branch was verified correct
+  via direct synthetic-tensor testing rather than end-to-end, because
+  `generate_noise()` itself has a **separate, pre-existing, unrelated**
+  shape bug for `multicoil > 1` (crashes with a broadcast-shape
+  `RuntimeError` in its SNR-per-transient scaling) that blocks exercising
+  the real multicoil path at all right now. Documented as a new finding,
+  not fixed (out of scope for this fix) -- tracked below.
+
+**Tests**: 3 regression tests in `tests/test_physics_model_bugfixes.py`,
+including one that explicitly reproduces the exact contamination pattern
+(`batch_size=4`, asserts sample `i`'s noisy branch is never sample 0's
+signal) and one covering the multicoil branch via synthetic tensors.
+Full suite: 66/66 passing at this point.
+
+**Open follow-up from the repo owner**: whether to go further and
+*always* unconditionally add the transients (and possibly other) axes
+regardless of whether that component is active, rather than
+conditionally -- eliminating this whole class of shape-inference bugs at
+the cost of a breaking output-shape change across the pipeline. Not
+decided; needs a deliberate, separate discussion given the downstream
+impact on `mainFcns._save()`, NIfTI export, and `plot_mrs.py`.
+
+**Also newly found, not fixed**: `generate_noise()` crashes for
+`multicoil > 1` (`RuntimeError: output with shape [4, 1, 1] doesn't match
+the broadcast shape [4, 4, 1, 1]` in its per-transient SNR scaling,
+`lin_snr /= s**0.5`). This means the multicoil path is currently unusable
+end-to-end regardless of the bug above -- tracked here for whenever
+multicoil support is revisited.
+
+## Milestone 9 — Provenance, MRSsynMRS export, parameter replay (commit `9fd3da8`)
+
+**Handover sections addressed**: 8 (parameter replay) and 9
+(reproducibility/provenance).
+
+**Files changed**: `src/provenance.py` (new), `src/mrssynmrs.py` (new),
+`src/parameters.py` (`SimulationParameters.save()`/`.load()`),
+`tests/test_provenance.py` (new, 7 tests), `tests/test_mrssynmrs.py` (new,
+8 tests), `tests/test_parameters.py` (+2 tests).
+
+**Provenance**: `collect_provenance()` gathers git commit, a content hash
+of the actual basis functions used (`pm.syn_basis_fids`, not just the
+filename -- catches two files sharing a name but differing in content),
+acquisition metadata, enabled components, RNG seed, package versions, SNR
+definitions, and data-processing state into a `Provenance` record.
+**Real finding, not guessed**: `vendor`/`pulse_sequence` are written into
+a compiled basis set's `.mat` header by
+`process_basis_functions.py`'s `build_header_fields()` (e.g.
+`--pulse_sequence 'COWS7_sLASER'`), but `aux.convertdict()` -- which runs
+whenever `PhysicsModel` loads that `.mat` file -- unconditionally deletes
+`'seq'`/`'vendor'`/`'pulse_sequence'`/`'pulseSequence'` keys. Verified
+directly: `pm.header` never has them. This is a genuine basis-set-metadata
+gap (relevant to the still-open section 11 audit, not just provenance) --
+the information is written at compile time and silently discarded before
+`PhysicsModel` ever sees it. Left `None`, not guessed, per the handover
+doc's instruction; `vendor` is instead read from the JSON config (e.g.
+`cows.json`'s `"vendor"` field) where available. Side note, not chased
+further: `cows.json` sets `"vendor": "GE"` while its actual basis-set file
+is named `raw_update_COWS7_sLASER_30_Siemens_3000.mat` (Siemens sLASER) --
+possibly an inconsistency in that config, possibly intentional; not
+investigated.
+
+**MRSsynMRS export**: the handover doc names a specific Google Sheet as
+the reporting standard and says to inspect it if accessible, and not to
+invent its contents otherwise. **It was accessible from this
+environment** -- `export_mrssynmrs_table()`'s field structure (section
+names, field names, nesting) is transcribed directly from the actual
+sheet, not recalled or invented. Per the repo owner (citing "Synthetic
+Data in MR Spectroscopy: Current Practices, Applications, and
+Considerations"): this table is meant to be tailored per dataset, not
+treated as one fixed schema -- e.g. edited spectra need extra rows
+(edited ppm, editing targets) unedited spectra don't. `extra_sections`
+merges caller-supplied fields into the table's 'Pulse Sequence' section
+for exactly that; nothing here auto-detects editing (MRS-Sim's
+difference-editing support is itself flagged as largely unimplemented, so
+there's nothing reliable to detect it from yet). Concentration/T2 ranges
+are read from the *effective* `pm.min_ranges`/`max_ranges` (reflecting
+any config override), not the raw `metabolites_database.json` values,
+so the exported ranges match what a given dataset was actually sampled
+from. Real scanner/sequence-level fields MRS-Sim does not model at all
+(voxel size, water suppression, shimming, RF pulse shapes, patient
+population) are left explicitly `None`.
+
+**Parameter replay**: `SimulationParameters.save()`/`.load()` persist a
+parameter tensor together with its own registry (index + metabolite
+names), so a saved file can be reloaded and passed to any compatible
+`PhysicsModel.forward()` without the original `PhysicsModel` instance.
+Verified directly: two independently-constructed `PhysicsModel` instances
+from the same config, given the identical `params.tensor`, produce
+identical output (`nuisance_free` diff exactly 0.0) -- the tensor was
+already portable by construction (no back-reference to any specific
+model instance); `save()`/`load()` just make persisting it to disk
+convenient. A genuinely incompatible layout (different metabolite
+list/order) is expected to surface as an ordinary shape-mismatch error
+inside `forward()`, not a silent misalignment -- not separately tested
+here since it depends on which two basis sets are compared. Noise-
+realization replay (the doc's other ask under section 8, "retain/replay
+the actual noise realization") is satisfied by `SimulationResult.noise`
+from Milestone 5, once its normalization-scale bug (Milestone 8, above)
+was fixed: `noisy == noise_free_total + noise` now holds exactly, so
+saving `.noise` alongside a result is sufficient for exact noisy-spectrum
+reproduction without needing to reproduce `generate_noise()`'s own RNG
+state.
+
+**Behavior changes**: none -- all three modules are new, additive
+utilities; nothing in the existing `forward()`/`compile_outputs()` path
+was touched by this milestone (the noise-scale fix folded into Milestone
+8's commit instead, since it was found and fixed together with that
+critical bug).
+
+**Assumptions resolved**: the MRSsynMRS table's field structure (now
+known, not assumed); the vendor/pulse-sequence provenance gap (now
+documented, not assumed away).
+
+**Tests**: 17 new unit tests across the three areas, using lightweight
+fake `PhysicsModel`-like objects per the established pattern. Full suite:
+68/68 passing. End-to-end verified against `cows.json`'s real basis set
+for provenance field population, the exported table's concentration/T2
+ranges, and cross-instance parameter replay.
+
+**Remaining/follow-up**:
+- `Provenance`/`export_mrssynmrs_table()` are standalone utilities a
+  caller invokes explicitly with `pm`/`config`/`sampler` -- they are not
+  auto-populated into `SimulationResult.provenance` (which stays a
+  cheap, always-on `{'noise_enabled', 'offsets_enabled'}` dict), since
+  `forward()` doesn't receive `config`/`sampler` and threading them
+  through would go against "keep the normal forward path lightweight".
+- `mrs_sim_version` in `Provenance` is always `None` -- this repo has no
+  package `__version__` yet.
+- Full MRSsynMRS-table auto-population still needs per-dataset human
+  input for fields MRS-Sim cannot know (Experiment ID, population/ROI
+  description for whatever in-vivo data a copula sampler's parameters
+  came from, any editing-specific rows).
+
+## Open design questions raised by the repo owner (not yet acted on)
+
+Three points raised mid-session that affect the sampler/config design
+directly, recorded here so they aren't lost before a dedicated design
+pass:
+
+1. **Three separate, overlapping ways parameter ranges get defined**
+   today: (a) `"parameters"` blocks in a config JSON
+   (`set_parameter_constraints()`), (b) defaults baked into a basis set's
+   `metabolites_database.json` (loaded automatically, overridden by (a)
+   when present), and (c) bypassing ranges entirely by defining parameter
+   *distributions* directly in already-quantified numerical space (the
+   deep-learning-research convention: `[0, 1]` with `1` = the range's max
+   and `0` = actually zero/omitted). The repo owner's own assessment:
+   "probably excessive and very certainly redundant." Not simplified in
+   this session -- flagged for a deliberate design pass, likely alongside
+   generalizing (c) via `CopulaInVivoSampler`/point 2 below.
+2. **Config-defined statistical distributions, not just min/max**: the
+   repo owner is open to letting config files define per-parameter
+   distributions the way `sim_COWS.py`'s copula/`findParamDist.py`
+   pipeline already does, rather than being limited to `[min, max]`
+   ranges. This would generalize `CopulaInVivoSampler`
+   (`src/sampling.py`, Milestone 3) from "fit-to-in-vivo-data" specifically
+   into a more general "config declares a distribution per parameter"
+   mechanism, and probably also folds in point 1's redundancy cleanup.
+3. **Confirmed**: the missing `parameter_distributions_best_fit_recovered.json`/
+   `correlation_matrix.mat` files referenced by `cows.json` are on a
+   different machine, not in this repo -- the repo owner will provide
+   them later. Until then, `CopulaInVivoSampler`'s name-based alignment
+   (Milestone 3) remains unverified against real data; the repo owner
+   separately confirmed my root-cause guess for the historical magic-
+   number reordering is plausible but not confirmed, and independently
+   noted (re: `findParamDist.py`) that only one spectral-fitting
+   software's export format is currently supported, with more planned.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across
-basis sets), 9 (provenance), 10 (relaxation/TE/TR, including the agreed
-`V1_0` legacy-broadening flag), 11 (basis-set metadata / double-application
-audit), 12 (NIfTI-MRS export audit), 13 (broader test-suite expansion
-beyond what's landed alongside sections 1-6).
+10 (relaxation/TE/TR, including the agreed `V1_0` legacy-broadening flag),
+11 (basis-set metadata / double-application audit), 12 (NIfTI-MRS export
+audit), 13 (broader test-suite expansion beyond what's landed alongside
+sections 1-9).
 
 Sections 3 (component outputs) and 4 (nuisance removal) are done for what
 the current pipeline already computes (Milestone 5), but per-component
@@ -418,7 +660,23 @@ skip-to-save-memory/compute is deferred, and the `presim` validation gap
 and baseline/residual-water ppm-grid alignment question (both noted above)
 remain open.
 
-Sections 5 (baseline spline fitting) and 6 (CRLB/FIM) are done (Milestones
-6 covers CRLB; splines landed in the commit just before it) within the
+Sections 5 (baseline spline fitting) and 6 (CRLB/FIM) are done within the
 documented scope noted above -- CRLB does not yet model B0/eddy currents/
 multi-coil/first-order phase/residual water/resampling.
+
+Sections 8 (parameter replay) and 9 (provenance) are done for what's
+listed in Milestone 9 above; full MRSsynMRS auto-population still needs
+per-dataset human input for fields MRS-Sim cannot know, and provenance is
+a standalone opt-in utility rather than wired into SimulationResult.
+
+**Also newly known but not yet started**: the multicoil (`num_coils>1`)
+path is currently unusable end-to-end -- `generate_noise()` crashes with a
+shape-mismatch `RuntimeError` for it (found during Milestone 8's
+verification), independent of that milestone's fix. The repo owner's open
+question about unconditionally adding transients (and other) axes
+everywhere, rather than conditionally, is also unresolved (Milestone 8).
+Three open design questions about parameter-range/distribution definition
+(config `"parameters"` blocks vs. basis-set defaults vs. direct numerical-
+space distributions, and generalizing config-declared distributions
+beyond `CopulaInVivoSampler`) are recorded above, raised by the repo owner
+but not yet acted on.
