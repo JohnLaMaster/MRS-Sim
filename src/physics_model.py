@@ -939,10 +939,25 @@ class PhysicsModel(nn.Module):
         for _ in range(fid.ndim-param.ndim): param = param.unsqueeze(-1)
 
         lin_snr = 10**(param / 10) # convert from decibels to linear scale
-        if not isinstance(transients, type(None)): 
-            # Scale the mean SNR accourding to the number of transients
-            s = torch.zeros_like(param) + int(transients.shape[-1]) - \
-                    zeros.unsqueeze(-1).unsqueeze(-1)
+        if not isinstance(transients, type(None)):
+            # BUGFIX (v2.0): this hardcoded two unsqueezes for `zeros`,
+            # assuming it needed to go from 2-D ([bS, 1], after the
+            # sum(dim=-1, keepdims=True) above) to 4-D to match `param`.
+            # But `param` was only ever brought up to `fid.ndim` dims
+            # (the loop above), and `fid` (fidSum) is still 3-D at this
+            # point in forward() -- multicoil() hasn't tiled a transients
+            # axis onto it yet, that happens later. Two unsqueezes made
+            # `zeros` one dimension too many relative to `param`, which
+            # torch.zeros_like(param) + ... - zeros then silently
+            # broadcast into an unintended [bS, bS, 1, 1] shape instead of
+            # [bS, 1, 1] -- `lin_snr /= s**0.5` then failed immediately
+            # (in-place op can't grow lin_snr to that shape), a hard crash
+            # for every multicoil (num_coils > 1) config. Verified
+            # reproducible independent of anything else changed in this
+            # refactor. Match `param`'s own dimension-matching convention
+            # instead of a hardcoded count.
+            for _ in range(param.ndim - zeros.ndim): zeros = zeros.unsqueeze(-1)
+            s = torch.zeros_like(param) + int(transients.shape[-1]) - zeros
             lin_snr /= s**0.5
             for _ in range(fid.ndim-transients.ndim): 
                 transients = transients.unsqueeze(-1)
