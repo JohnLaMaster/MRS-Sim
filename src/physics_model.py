@@ -248,7 +248,12 @@ class PhysicsModel(nn.Module):
         # # and in the sampling code
         # num_bF = l + self.MM if self.MM else l
         # print('self._metab: ',self._metab) # correct
-        header, cnt = self._metab, counter(start=int(3 * num_bF * self.num_spins) - 1)
+        # NOTE: `header` must be a *copy* of self._metab, not an alias. The loop
+        # below appends parameter-family names (d, dmm, g, ..., coil_phi0) onto
+        # `header` for column-range labeling; aliasing previously mutated
+        # self._metab in place, silently polluting pm.metab/pm._metab with
+        # non-metabolite names for the lifetime of the model.
+        header, cnt = list(self._metab), counter(start=int(3 * num_bF * self.num_spins) - 1)
         g = 1 if not self.MM else 2
         names = []; #['d',   'dmm', 'g',   'gmm', 'fshift']#, 'snr', 'phi0', 'phi1']
         mult  = []; #[  l, self.MM,   l, self.MM,        1]#,     1,      1,      1] 
