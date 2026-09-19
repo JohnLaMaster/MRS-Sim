@@ -646,6 +646,117 @@ pass:
    noted (re: `findParamDist.py`) that only one spectral-fitting
    software's export format is currently supported, with more planned.
 
+## Milestone 10 — Two more multicoil/SNR bugs (repo-owner-requested re-verification) + metabolite database defaults (commits `b52f4cd`, `f6f5f97`)
+
+**Context**: the repo owner pushed back on Milestone 8's critical bug
+finding -- they had successfully generated large datasets with correctly
+varying per-sample SNR, which seemed to contradict "the noisy output is
+wrong". Re-verified with an airtight, dead-simple reproduction (two
+samples with trivially distinguishable clean signals `1000`/`-1000` and
+distinct noise `0.1`/`0.2`, run through the *exact* pre-fix code): sample
+1's noisy output came out as `1000.2` (sample 0's clean signal + sample
+1's own noise), not `-999.8` (its own). This also gave a precise way to
+explain why the two observations don't conflict: noise *magnitude*
+generation (`generate_noise()`) was always correct and independent per
+sample -- only the *clean signal identity* the noise got added to was
+wrong. The repo owner accepted this once demonstrated concretely, and
+separately asked me to re-verify the multicoil crash claim too (also
+confirmed reproducible, independently, with a fresh run).
+
+**Two more bugs found and fixed while re-verifying, at the repo owner's
+request to fix them before moving on**:
+
+1. `generate_noise()` crashed unconditionally for `multicoil > 1`
+   (`RuntimeError` in its per-transient SNR scaling, `lin_snr /= s**0.5`).
+   Root cause: `zeros.unsqueeze(-1).unsqueeze(-1)` hardcoded two
+   unsqueezes assuming `zeros` needed to go from 2-D to 4-D to match
+   `param`, but `param` (and `fid`/fidSum at this point in the pipeline)
+   is only ever 3-D here -- `multicoil()`'s transients-axis tiling hasn't
+   happened yet. Fixed to match `param`'s own dimension-counting
+   convention instead of a hardcoded count.
+2. Fixing #1 surfaced a **third**, separate, deeper shape mismatch in the
+   `pSNR`/`sSNR` (power/spectral SNR *reporting* metric) computation,
+   also multicoil-only. **Not fixed** -- the multicoil path (`num_coils >
+   1`) still isn't usable end to end. Deferred rather than open-endedly
+   chasing what looks like a never-exercised code path; none of this
+   repo's configs use `num_coils > 1`.
+
+**Metabolite database defaults** (the repo owner's main ask this
+milestone, prompted by the new handover doc section 18 -- see below):
+`src/metabolite_database.py` provides validated access to
+`metabolites_database.json`'s `Conc`/`T2.metab`/`T2.spins`/`omega`
+entries and a `apply_range_overrides()` merge utility, wired into
+`PhysicsModel.__init__()` (new `database_overrides` parameter) and
+`mainFcns.prepare()` (new optional config field
+`metabolite_database_overrides`). `Conc`/`T2.metab` were already used as
+sampling-range defaults (confirmed by reading `define_parameter_ranges()`,
+not assumed) -- not new. `T2.spins`/`omega` (per-moiety values) were
+confirmed completely unused anywhere (zero grep hits) -- this commit makes
+them loadable/validated/overridable, **not** wired into actual
+simulation, since that requires finishing the separately-unfinished
+individual-spin ("separated moieties") basis pipeline (see below).
+
+**Real data-quality finding**: `validate_database()` (checks that
+`omega`/`T2.spins.min`/`T2.spins.max` have matching lengths per
+metabolite -- moiety ordering is a database contract) found 3 pre-existing
+mismatches in the real database: `glc` (`T2.spins.max` has 15 entries vs.
+14 for `omega`/`T2.spins.min`), `naa` (`T2.spins.max` has 6 vs. 5 -- the
+extra value, `320.17`, exactly matches NAA's `T2.metab.max`, suggesting an
+accidental append), and `try` (both `T2.spins.min`/`max` have 8 vs.
+`omega`'s 7). Reported to the repo owner; **not** silently corrected
+(guessing which array element is spurious would be fabricating data) and
+pinned as a regression test (`test_validate_database_against_real_database_finds_known_issues`)
+so the database's current, known-imperfect state is explicit rather than
+silently passing or failing when it changes.
+
+**Verified end to end** against `cows.json`'s real basis set: overriding
+an unconstrained metabolite's (`cho`) concentration range via the new
+config field changes `pm.min_ranges`/`max_ranges` as expected; a
+metabolite the config's own `"parameters"` block already constrains
+(`naa`) correctly keeps that more specific override (existing precedence,
+confirmed unaffected -- my first test picked `naa` and initially looked
+like the override "didn't work", which turned out to be exactly this
+precedence rule, not a bug); omitting the new field entirely reproduces
+the exact pre-existing baseline ranges.
+
+**Handover doc section 18** (new, appended by the repo owner mid-session):
+a substantially larger physiological-profile/pathology-modeling system --
+separating base metabolite data from pathology profiles, multiplicative
+concentration modifiers with retained descriptive statistics, integrating
+the external Gudmundson MRS database
+(https://github.com/agudmundson/mrs-database) via a curated-extraction
+pipeline, field-strength metadata/extensibility, profile
+inheritance/composition, and extensive provenance requirements. This is
+explicitly **not** implemented in this milestone -- the repo owner asked
+only for the scoped database-defaults wiring above, and separately asked
+to be reminded to come back and finish both this section-18 system and
+the individual-spin ("separated moieties") pipeline (see the reminder
+below). Note: the doc's section 18 has a stray `print("I would append the
+section above to the existing handover.")` line and an unmatched `"""`
+right before "## Final requirement" -- flagged to the repo owner as
+likely an accidental artifact from however that section was drafted, not
+acted on (it's their document to edit).
+
+**Behavior changes**: none to existing configs -- `database_overrides`/
+`metabolite_database_overrides` both default to `None`/absent, reproducing
+exactly the previous ranges.
+
+**Tests**: 14 new (`test_metabolite_database.py`). No new test for the
+`generate_noise()` multicoil fix yet (tracked as a follow-up once the
+remaining pSNR/sSNR multicoil bug is also resolved, so multicoil can be
+tested end-to-end in one pass, per the previous milestone's note). Full
+suite: 82/82 passing.
+
+**REMINDER (explicitly requested by the repo owner)**: come back and
+finish (a) the full individual-spin ("separated moieties") simulation
+pipeline -- per-spin frequency-shift application using `omega`, per-spin
+linewidth sampling using `T2.spins`, fixing the existing unfinished/buggy
+basis-loading branch, and extending the parameter registry for per-spin
+columns -- and (b) handover doc section 18's physiological-profile/
+pathology system in full (Gudmundson data curation, profile inheritance,
+concentration multipliers, field-strength extensibility, provenance).
+Neither is started beyond the database-access layer above.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across
