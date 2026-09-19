@@ -989,18 +989,43 @@ class PhysicsModel(nn.Module):
     def _stack_noisy_clean(signal: torch.Tensor,
                            noise_vec: torch.Tensor,
                            dim: int,
+                           has_transients_axis: bool = False,
                           ) -> torch.Tensor:
         '''
-        Stack a [noisy, clean] pair for `signal` along `dim`. The noisy
-        branch adds `noise_vec` to `signal`'s own index-0 line (the
-        convention generate_noise's max_val/scaling was computed from); the
-        clean branch is `signal` itself, with no noise added. `signal` is
-        used for both fidSum and spectral_fit so that they share this
+        Stack a [noisy, clean] pair for `signal` along `dim`; the clean
+        branch is `signal` itself, with no noise added. `signal` is used
+        for both fidSum and spectral_fit so that they share this
         implementation rather than each keeping their own hand-written copy
         of it, which had previously drifted apart (see
         docs/v2/architecture_v1_audit.md section 14, bug #2).
+
+        `has_transients_axis` MUST be passed explicitly (true iff
+        `multicoil()` was applied to `signal`, i.e. `multicoil > 1` in
+        `forward()`) rather than inferred from `signal`'s shape.
+
+        CRITICAL BUGFIX (v2.0): this used to always do
+        `signal[...,0,:,:].clone().unsqueeze(-3) + noise_vec` regardless of
+        whether a transients axis existed. That indexing is only correct
+        when `signal` has a transients axis at position -3 (shape
+        `[bS, transients, channels, L]`, produced by `multicoil()`) -- the
+        ellipsis then consumes exactly the batch dimension and `,0,` picks
+        transient 0 *per sample*, broadcasting noise_vec's own per-
+        transient realizations across it. When no transients axis exists
+        (the common single-coil case, `signal` is `[bS, channels, L]`),
+        the *same* `[...,0,:,:]` pattern has one dimension too few for the
+        ellipsis to skip the batch axis, so it silently indexed the BATCH
+        axis instead -- meaning every sample's "noisy" output was built
+        from batch sample 0's clean signal, not its own. Verified directly
+        against a real basis set: sample i's noisy output correlated
+        0.9999+ with sample 0's clean spectrum and only ~0.92 with its own.
+        This affected every batched (`batch_size > 1`) simulation with
+        `noise=True` and a single coil (`multicoil <= 1`) -- see
+        docs/v2/progress_log.md, Milestone 8, for the full writeup.
         '''
-        noisy = signal[...,0,:,:].clone().unsqueeze(-3) + noise_vec
+        if has_transients_axis:
+            noisy = signal[...,0,:,:].clone().unsqueeze(-3) + noise_vec
+        else:
+            noisy = signal + noise_vec
         return torch.stack((noisy, signal), dim=dim)
 
     def refine_noise(self,
@@ -1633,8 +1658,8 @@ class PhysicsModel(nn.Module):
             # clean/index-1 side of this axis expecting a noise-free signal
             # (e.g. NIfTI-MRS's "noise_free" export selection, or denoising
             # ground truth).
-            fidSum = self._stack_noisy_clean(fidSum, noise_vec, d)
-            spectral_fit = self._stack_noisy_clean(spectral_fit, noise_vec, d)
+            fidSum = self._stack_noisy_clean(fidSum, noise_vec, d, has_transients_axis=multicoil > 1)
+            spectral_fit = self._stack_noisy_clean(spectral_fit, noise_vec, d, has_transients_axis=multicoil > 1)
             # Keep both noisey transients and clean transients
             # output.shape: [bS, ON\OFF, [noisy/clean/clean_filt], transients, channels, length]
             #                    transients, channels, length]
@@ -1904,6 +1929,18 @@ class PhysicsModel(nn.Module):
             noisy = specSummed.select(dim=d, index=0)
             noise_free_total = specSummed.select(dim=d, index=1)
             nuisance_free = spectral_fit.select(dim=d, index=1)
+            # BUGFIX (v2.0): noise_vec is generated (in generate_noise())
+            # before specSummed's final normalize() call, so it was on a
+            # different scale than noisy/noise_free_total -- `noisy ==
+            # noise_free_total + noise` did NOT hold (off by the per-sample
+            # normalization denom) until this fix. denom has a size-1 entry
+            # at axis `d` (from normalize()'s `amax(..., dim=noisy,
+            # keepdim=True)`), with the same value at every index along
+            # that axis, so selecting index 0 there aligns its shape with
+            # noise_vec's (which has no `d` axis at all) without changing
+            # any value. Verified empirically against a real basis set --
+            # see docs/v2/progress_log.md, Milestone 8.
+            noise_vec = noise_vec / denom.select(dim=d, index=0)
         else:
             # No noisy/clean split exists when noise is disabled -- both
             # fidSum and spectral_fit were unsqueezed to a single (size-1)
