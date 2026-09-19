@@ -25,7 +25,7 @@ per the handover doc's explicit terminology section.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 
@@ -54,9 +54,15 @@ class SimulationResult:
     target_snr: Optional[torch.Tensor] = None
     realized_snr: Optional[Dict[str, Any]] = None
 
-    # Not yet implemented (handover section 6: CRLB/Fisher information).
+    # Handover section 6: CRLB/Fisher information. Disabled by default
+    # (forward(..., compute_crlb=False)); see src/crlb.py for the model's
+    # documented scope. `crlb_labels` identifies each CRLB/FIM dimension
+    # (registry.metabolite_names order for amplitude/d/g/frequency_shift,
+    # then 'phi0', then baseline spline coefficients), per the handover
+    # doc's "the parameter registry must identify each CRLB/FIM dimension".
     crlb: Optional[torch.Tensor] = None
     fim: Optional[torch.Tensor] = None
+    crlb_labels: Optional[List[str]] = None
 
     quantities: Optional[Dict[str, Any]] = None
 

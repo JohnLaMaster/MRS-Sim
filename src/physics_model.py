@@ -1465,6 +1465,8 @@ class PhysicsModel(nn.Module):
                 presim: dict=None,
                 snr_filter: float=False,
                 return_components: bool=False,
+                compute_crlb: bool=False,
+                return_fim: bool=False,
                ) -> torch.Tensor:
         
         if params.ndim==1: params = params.unsqueeze(0) # Allows batchSize = 1
@@ -1795,6 +1797,7 @@ class PhysicsModel(nn.Module):
                 specSummed=specSummed, spectral_fit=spectral_fit, offsets=offsets,
                 params=params, denom=denom, quantities=quantities, SNR=SNR,
                 noise=noise, noise_vec=noise_vec if noise else None, d=d,
+                compute_crlb_flag=compute_crlb, return_fim=return_fim,
             )
         return self.compile_outputs(specSummed, spectral_fit, offsets, params,
                                     denom, quantities, SNR=SNR)
@@ -1847,6 +1850,8 @@ class PhysicsModel(nn.Module):
                         noise: bool,
                         noise_vec,
                         d: int,
+                        compute_crlb_flag: bool=False,
+                        return_fim: bool=False,
                        ) -> 'SimulationResult':
         '''
         Build the v2.0 structured SimulationResult (handover section 3).
@@ -1914,6 +1919,47 @@ class PhysicsModel(nn.Module):
         registry = ParameterRegistry.from_physics_model(self)
         sim_params = SimulationParameters(tensor=params, registry=registry)
 
+        # Handover section 6: CRLB/FIM. Disabled by default (compute_crlb
+        # defaults to False in forward()) -- an analysis/reference quantity,
+        # not part of the normal (fast) forward path. See src/crlb.py for
+        # the documented scope of what this CRLB model does and does not
+        # include.
+        crlb = None
+        fim = None
+        if compute_crlb_flag:
+            if noise_vec is None:
+                raise ValueError(
+                    "compute_crlb=True requires noise=True: CRLB needs a "
+                    "noise covariance model, and none is defined when "
+                    "noise is disabled. See src/crlb.py."
+                )
+            from .crlb import compute_crlb as _compute_crlb
+            from .splines import build_spline_basis
+
+            crlb_basis = build_spline_basis(self.ppm_cropped.squeeze(0), knot_spacing=0.4, dtype=params.dtype)
+            if spline_coefficients is not None:
+                beta_for_crlb = spline_coefficients
+                while beta_for_crlb.ndim > 3:
+                    beta_for_crlb = beta_for_crlb.squeeze(-3)
+            else:
+                # No baseline was generated -- still include the spline
+                # nuisance parameters in the CRLB model, fixed at zero,
+                # rather than changing the model's parameter count based on
+                # whether a baseline happened to be enabled this call.
+                beta_for_crlb = torch.zeros(
+                    params.shape[0], 2, crlb_basis.shape[-1], dtype=params.dtype)
+
+            sigma = noise_vec.std(dim=-1).reshape(noise_vec.shape[0], -1).mean(dim=-1)
+
+            crlb_result = _compute_crlb(
+                self, params, beta_for_crlb, crlb_basis, sigma=sigma, return_fim=return_fim,
+            )
+            crlb = crlb_result.crlb
+            fim = crlb_result.fim
+            crlb_labels = crlb_result.labels
+        else:
+            crlb_labels = None
+
         return SimulationResult(
             noisy=noisy,
             noise_free_total=noise_free_total,
@@ -1926,6 +1972,9 @@ class PhysicsModel(nn.Module):
             parameters=sim_params,
             target_snr=params[:, self.index['snr']],
             realized_snr=realized_snr,
+            crlb=crlb,
+            fim=fim,
+            crlb_labels=crlb_labels,
             quantities=quantities,
             provenance={
                 'noise_enabled': noise,
