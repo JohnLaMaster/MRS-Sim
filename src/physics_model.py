@@ -985,6 +985,24 @@ class PhysicsModel(nn.Module):
 
         return inv_Fourier_Transform(e), d
 
+    @staticmethod
+    def _stack_noisy_clean(signal: torch.Tensor,
+                           noise_vec: torch.Tensor,
+                           dim: int,
+                          ) -> torch.Tensor:
+        '''
+        Stack a [noisy, clean] pair for `signal` along `dim`. The noisy
+        branch adds `noise_vec` to `signal`'s own index-0 line (the
+        convention generate_noise's max_val/scaling was computed from); the
+        clean branch is `signal` itself, with no noise added. `signal` is
+        used for both fidSum and spectral_fit so that they share this
+        implementation rather than each keeping their own hand-written copy
+        of it, which had previously drifted apart (see
+        docs/v2/architecture_v1_audit.md section 14, bug #2).
+        '''
+        noisy = signal[...,0,:,:].clone().unsqueeze(-3) + noise_vec
+        return torch.stack((noisy, signal), dim=dim)
+
     def refine_noise(self,
                      fid_shape, # fid.shape[-1]
                      ind: torch.Tensor,
@@ -1601,19 +1619,19 @@ class PhysicsModel(nn.Module):
         # Add Noise
         if noise:
             if gen: print('>>>>> Adding noise')
-            # noise, d = self.generate_noise(fid=fidSum, 
-            #                                max_val=mx_values, 
-            #                                param=params[:,self.index['snr']], 
-            #                                zeros=params[:,self.index['coil_sens']], # num of zeroed out coils
-            #                                transients=params[:,self.index['coil_snr']],
-            # #                                uncorrelated=True)
-            # # # Need to revisit this next line. Currently replaced with the one below.
-            fidSum = torch.stack((fidSum[...,0,:,:].clone().unsqueeze(-3) + noise_vec, fidSum + noise_vec), dim=d)
-            # # fidSum = torch.stack((fidSum[...,0,:,:].clone().unsqueeze(-3) + noise_vec, fidSum + noise_vec), dim=d)
-            # fidSum = fidSum + noise_vec
-            # fidSum = torch.stack((fidSum[...,0,:,:].clone().unsqueeze(-3) + noise_vec, fidSum), dim=d)
-            spectral_fit = torch.stack((spectral_fit[...,0,:,:].clone().unsqueeze(-3) + noise_vec, 
-                                        spectral_fit), dim=d)
+            # BUGFIX (v2.0): fidSum and spectral_fit each used to build their
+            # own hand-written [noisy, clean] stack, and the two copies had
+            # drifted apart -- fidSum's "clean" branch also had noise_vec
+            # added to it, while spectral_fit's did not. Both now go through
+            # one shared implementation so they cannot silently diverge like
+            # that again. See docs/v2/architecture_v1_audit.md section 14
+            # (bug #2) / docs/v2/progress_log.md for how this was found and
+            # verified. This directly affects any consumer that reads the
+            # clean/index-1 side of this axis expecting a noise-free signal
+            # (e.g. NIfTI-MRS's "noise_free" export selection, or denoising
+            # ground truth).
+            fidSum = self._stack_noisy_clean(fidSum, noise_vec, d)
+            spectral_fit = self._stack_noisy_clean(spectral_fit, noise_vec, d)
             # Keep both noisey transients and clean transients
             # output.shape: [bS, ON\OFF, [noisy/clean/clean_filt], transients, channels, length]
             #                    transients, channels, length]
