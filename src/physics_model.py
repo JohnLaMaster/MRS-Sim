@@ -298,8 +298,18 @@ class PhysicsModel(nn.Module):
         names.append('coil_sens'),          mult.append(num_coils)
         names.append('coil_fshift'),        mult.append(num_coils)
         names.append('coil_phi0'),          mult.append(num_coils)
-        names.append('temperature'),        mult.append(1)
-        for n, m in zip(names, mult): 
+        # NOTE: a 'temperature' column was previously appended here
+        # unconditionally, but temperature is not implemented anywhere in
+        # the forward model (no corresponding self._index entry / dct key
+        # was ever added for it -- both are commented out below). That made
+        # `header` one column longer than `ind['overall']`, so
+        # self.min_ranges/self.max_ranges (sized from `header`, see
+        # define_parameter_ranges below) had one more column than the
+        # params tensor itself, breaking quantify_params() for every model
+        # with a RuntimeError (shape mismatch) the moment it was actually
+        # called. Removed until temperature is implemented for real, at
+        # which point it needs a matching ind[]/dct entry added too.
+        for n, m in zip(names, mult):
             for _ in range(m): header.append(n)
             
         # Define the min/max ranges for quantifying the variables
