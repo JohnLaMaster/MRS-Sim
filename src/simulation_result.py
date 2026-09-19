@@ -41,9 +41,9 @@ class SimulationResult:
     nuisance_free: Optional[torch.Tensor] = None
 
     baseline: Optional[torch.Tensor] = None
-    # Not yet implemented (handover section 5): fitting the generated
-    # baseline with splines. Present as explicit None fields, not omitted,
-    # so callers can tell "not computed" apart from "no such field".
+    # Handover section 5: the generated baseline immediately fit with a
+    # spline (src/splines.py), without altering `baseline` itself. Both
+    # are None whenever `baseline` is None (no baseline was generated).
     baseline_fit: Optional[torch.Tensor] = None
     spline_coefficients: Optional[torch.Tensor] = None
 

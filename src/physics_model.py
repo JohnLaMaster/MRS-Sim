@@ -1868,6 +1868,7 @@ class PhysicsModel(nn.Module):
         '''
         from .parameters import ParameterRegistry, SimulationParameters
         from .simulation_result import SimulationResult
+        from .splines import fit_baseline_spline
 
         if offsets:
             if not isinstance(offsets['baselines'], type(None)):
@@ -1881,6 +1882,18 @@ class PhysicsModel(nn.Module):
         else:
             baseline = None
             residual_water = None
+
+        # Handover section 5: fit the already-generated baseline with a
+        # spline immediately, without altering `baseline` itself (the
+        # value actually used in add_offsets() upstream, in the forward
+        # simulation, is untouched by this). ppm_cropped is the acquired-
+        # grid x-axis baseline's last dimension is already on.
+        baseline_fit = None
+        spline_coefficients = None
+        if baseline is not None:
+            spline = fit_baseline_spline(baseline, self.ppm_cropped.squeeze(0))
+            baseline_fit = spline.fitted
+            spline_coefficients = spline.coefficients
 
         if noise:
             noisy = specSummed.select(dim=d, index=0)
@@ -1906,6 +1919,8 @@ class PhysicsModel(nn.Module):
             noise_free_total=noise_free_total,
             nuisance_free=nuisance_free,
             baseline=baseline,
+            baseline_fit=baseline_fit,
+            spline_coefficients=spline_coefficients,
             residual_water=residual_water,
             noise=noise_vec,
             parameters=sim_params,
