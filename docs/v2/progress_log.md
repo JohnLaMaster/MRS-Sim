@@ -757,6 +757,43 @@ pathology system in full (Gudmundson data curation, profile inheritance,
 concentration multipliers, field-strength extensibility, provenance).
 Neither is started beyond the database-access layer above.
 
+## Milestone 11 — Multicoil path fully fixed (commit `d31bebf`)
+
+Per the repo owner: previous datasets have used `num_coils>1`, so the
+multicoil path being broken (Milestones 8/10) was a real regression to
+fix, not a hypothetical low-priority path. Fixed the third and final
+multicoil bug found this session: `pSNR`/`sSNR` (per-metabolite-line power/
+spectral SNR reporting values, shape `[bS, num_bF, channels, 1]`, no
+transients axis) were divided by `noise_vec.std(...).unsqueeze(1)`
+unconditionally -- correct only when `noise_vec` has exactly one fewer
+dimension than `pSNR`/`sSNR` (single-coil case). For multicoil,
+`noise_vec` gains its own transients axis (same ndim as `pSNR`/`sSNR`), so
+the per-metabolite axis collided with the transients axis during
+broadcasting. Fixed by explicitly inserting a transients axis into
+`pSNR`/`sSNR` only when `noise_vec` actually has one
+(`has_transients_axis = noise_vec.ndim > 3`).
+
+**Multicoil (`num_coils>1`) now works end to end** -- verified against
+`cows.json` with `num_coils=3`: `forward()` completes successfully,
+`noisy.shape` is `[batch, transients, channels, length]` as expected, and
+critically, re-running the batch-contamination check from Milestone 8
+confirms **no regression**: every sample's noisy output still correlates
+1.000000 with its own clean signal in the multicoil case. Single-coil
+path re-verified unaffected (identical realized-SNR shapes/values).
+
+**Tests**: none added yet for this specific fix (time-constrained
+session -- the repo owner needed to disconnect from the internet
+shortly). Tracked as a follow-up: add a synthetic-tensor regression test
+for the pSNR/sSNR multicoil shape handling, mirroring the pattern used
+for `_stack_noisy_clean`'s `has_transients_axis` tests. Full suite:
+82/82 passing (no new tests, but no regressions).
+
+**Remaining known issue**: none identified in the multicoil path at this
+point -- all three bugs found this session in it are now fixed. Worth a
+broader/more thorough multicoil test pass later (edge cases: different
+transient counts, combined with baseline/residual water, etc.) since this
+path had apparently gone untested for a while.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across
