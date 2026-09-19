@@ -233,25 +233,37 @@ Two bugs above (double-broadening, §6; noisy/clean coupling axis, §3) are the 
 consequential for the refactor design and are called out separately. Additional
 findings, roughly ranked by confidence and impact:
 
-1. **Confirmed — `simulate_offsets()` crashes when exactly one of
-   baseline/residual-water is configured** (physics_model.py:1393): an unconditional
-   debug `print(...baselines.shape..., ...res_water.shape...)` dereferences `.shape`
-   on whichever of the two is `None`. Verified against shipped configs: at least
-   `src/config/predefined/B0_samples.json`, `EC_samples.json`, `Phi_samples.json`,
-   `transient_samples.json`, and both `src/config/templates/B0_samples*.json` define
-   `resWater_cfg` without `baseline_cfg` and would crash today when run with
-   `offsets=True`. Same debug-print pattern also exists in `add_offsets()`
-   (physics_model.py:570-571).
-2. **Confirmed — noisy/clean coupling bug**: at physics_model.py:1624, noise is added
-   to *both* branches of the `[noisy, clean]` stack for the main signal `fidSum`
-   (`fidSum[...,0,:,:] + noise_vec` AND `fidSum + noise_vec`), while the parallel
-   `spectral_fit` tensor two lines below correctly leaves its "clean" branch
-   unmodified. A commented-out line (1627) shows what looks like the originally
-   intended, bug-free version. This means any consumer that expects the "clean" half
-   of `fidSum`'s stacked axis (e.g. a `"noise_free"` NIfTI export selecting that
-   index) is currently getting a still-noisy spectrum instead. **Not yet fixed** —
-   flagged for the nuisance-component-removal / component-output work item, where
-   the noisy/clean axis semantics are being formalized anyway.
+1. **RETRACTED — was reading uncommitted debug code, not the committed
+   codebase.** This originally claimed `simulate_offsets()`/`add_offsets()`
+   crash when exactly one of baseline/residual-water is configured, due to
+   an unconditional debug `print(...baselines.shape...)` dereferencing
+   `.shape` on `None`. That print statement turned out to be part of the
+   repo owner's own *uncommitted* working-tree edits (present when this
+   audit was first written, since discarded at their request once
+   identified) -- it is not in the committed `physics_model.py` and never
+   was. The actual committed `simulate_offsets()`/`add_offsets()` guard
+   `None` correctly and do not crash for single-component configs. See
+   `docs/v2/progress_log.md`, Milestone 4, for how this was found.
+2. **Fixed (see progress_log.md, Milestone 4) — noisy/clean coupling bug**:
+   at physics_model.py's noise-addition step, noise was added to *both*
+   branches of the `[noisy, clean]` stack for the main signal `fidSum`
+   (`fidSum[...,0,:,:] + noise_vec` AND `fidSum + noise_vec`), while the
+   parallel `spectral_fit` tensor correctly left its "clean" branch
+   unmodified. Fixed by extracting the pattern into a single shared
+   `PhysicsModel._stack_noisy_clean()` used by both, with a unit-level
+   regression test (`tests/test_physics_model_bugfixes.py`).
+3. **Fixed (see progress_log.md, Milestone 4) — dead `'temperature'`
+   column broke `quantify_params()` unconditionally**: `initialize()`
+   appended a `'temperature'` entry to the `header` list used to size
+   `min_ranges`/`max_ranges`, with no corresponding entry in `ind`/`dct`,
+   making `min_ranges`/`max_ranges` exactly one column wider than the
+   params tensor. `quantify_params()` raised a shape-mismatch
+   `RuntimeError` the moment it was called with any config/basis set.
+   `sim_COWS.py` never hit this because it comments out its own
+   `quantify_params()` call; `mrs-sim_template.py`/
+   `deep_learning_dataset_template.py` call it directly and would have hit
+   this. Found while validating `UniformRangeSampler` (v2.0 section 2)
+   against a real basis set.
 3. `header = self._metab` aliasing bug (physics_model.py:251): `header` is bound to
    the same list object as `self._metab`, and the subsequent loop
    (`for n, m in zip(names, mult): header.append(n)`, 297-298) appends dozens of

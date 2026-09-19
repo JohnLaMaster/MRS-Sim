@@ -118,6 +118,89 @@ JSON + correlation-matrix pair is available to test against — flagged for
 whenever that data is accessible in this environment, or for the repo
 owner to spot-check directly.
 
+## Milestone 4 — Bugfixes surfaced while preparing sections 3-4 (commits `a3af34d`, `e244695`)
+
+**Handover sections addressed**: prep work for 3 (forward-sim component
+outputs) and 4 (nuisance-component removal); not the full sections yet.
+
+**Important correction first**: before starting this milestone, I found
+that `src/physics_model.py` had uncommitted, unrecognized edits already
+sitting in the working tree (debug prints and commented-out code in
+`add_offsets()`/`simulate_offsets()`/`forward()`'s offset-handling block).
+The repo owner didn't recognize the diff either, and recalled it was from
+debugging why residual water wasn't showing up as expected when simulating
+the COWS dataset. At their request I discarded it (`git checkout --
+src/physics_model.py`) before making further changes. **This means the
+architecture audit's original bug #1 (section 14) -- a claimed
+`simulate_offsets()`/`add_offsets()` crash on partial baseline/
+residual-water config -- was actually reading that uncommitted debug code,
+not the real committed codebase.** The committed version does not have
+that crash. The audit doc has been corrected in place (section 14, item 1)
+rather than silently left wrong.
+
+**Investigating the residual-water report**: tracing the discarded diff
+showed it had changed `sim_COWS.py`'s initial `baselines, res_water = None,
+None` to `config.baseline, config.reswater` (i.e. `True, True`). Fed
+through `forward()`'s `presim` reuse logic, boolean `True` values (neither
+`None` nor a real tensor) produce a nonsensical offset tuple
+(`True + True == 2`) instead of triggering fresh generation -- a real
+design flaw (the mechanism does not validate its own inputs) that this
+specific experiment happened to trigger. Empirically re-verified against
+the real, clean, committed code (`cows.json` + `UniformRangeSampler`) that
+residual water *does* generate and appear correctly in `forward()`'s output
+when `presim` is left as `None, None` as the committed `sim_COWS.py` does.
+The most likely explanation is that the reported "missing residual water"
+was introduced by the debugging attempt itself, not a pre-existing bug in
+the committed pipeline -- though a plotting-side issue (`src/aux/plot_mrs.py`,
+also separately modified/uncommitted) hasn't been ruled out and wasn't
+investigated further here.
+
+**Bugs fixed**:
+
+1. **`quantify_params()` shape mismatch** (commit `a3af34d`): a dead,
+   never-fully-implemented `'temperature'` column was unconditionally added
+   to the list sizing `min_ranges`/`max_ranges`, but never to `ind`, making
+   them one column wider than the params tensor. Broke `quantify_params()`
+   -- and therefore `UniformRangeSampler` -- for every basis set. Found
+   while validating milestone 3's sampler end to end.
+2. **Noise leaking into `fidSum`'s "clean" branch** (commit `e244695`):
+   `fidSum` and `spectral_fit` each had their own hand-written
+   `[noisy, clean]` stacking code, and the two had drifted apart --
+   `fidSum`'s "clean" branch also had noise added to it. Extracted into one
+   shared `PhysicsModel._stack_noisy_clean()` (a `staticmethod`, directly
+   unit-testable without a basis set) used by both, so they cannot silently
+   diverge again. Verified with an isolated unit test reproducing the exact
+   old-vs-new formulas, plus an end-to-end run against the real basis set.
+
+**Files changed**: `src/physics_model.py` (both fixes, isolated into their
+own commits from the discarded WIP), `tests/test_physics_model_bugfixes.py`
+(new, 1 test), `docs/v2/architecture_v1_audit.md` (corrected section 14).
+
+**Behavior changes**: `quantify_params()` now works instead of always
+raising `RuntimeError` (never usable before, so no prior caller could have
+depended on the crash). The noise-leak fix changes the *numeric content* of
+`fidSum`'s clean branch for any caller that reads it while `noise=True`
+(it no longer contains noise) -- flagged per the reporting requirement,
+though given the branch's entire documented purpose is to be noise-free,
+no correct usage could have depended on the old behavior.
+
+**Assumptions resolved**: none new (the presim type-validation improvement
+mentioned above is deferred to when sections 3/4 are implemented properly,
+not done in this milestone).
+
+**Tests**: 1 new unit test (`test_physics_model_bugfixes.py`), full suite
+still 26/26 passing. Manual end-to-end verification against `cows.json`'s
+real basis set for both fixes (see above).
+
+**Remaining/follow-up**: the `presim` mechanism (in `forward()`'s offset
+block) still silently misbehaves on non-`None`, non-tensor input instead of
+raising a clear error -- planned for when sections 3/4 are properly
+implemented, per the "use clear error messages for incompatible
+configurations" constraint. `compile_outputs()` also crashes when
+`noise=False` because `SNR={'power': None, 'spectral': None}` still gets
+`.any()` called on it -- found incidentally while verifying the noise-leak
+fix, not yet fixed, tracked here for when sections 3/4 land.
+
 ## Not yet started
 
 Handover sections 3 (forward-sim component outputs/toggles), 4 (nuisance
