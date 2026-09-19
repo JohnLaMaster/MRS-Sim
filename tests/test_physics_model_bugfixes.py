@@ -84,3 +84,44 @@ def test_stack_noisy_clean_with_transients_axis_broadcasts_transient_zero_per_sa
     # Per-sample: sample i's noisy base is sample i's own transient 0, not sample 0's.
     for i in range(1, bS):
         assert not torch.allclose(noisy[i, 0] - noise_vec[i, 0], signal[0, 0], atol=1e-3)
+
+
+def test_scale_snr_reference_single_coil_no_transients_axis():
+    """
+    Single-coil case (Milestone 11 regression): noise_std has no
+    transients axis, so it should just broadcast against the
+    per-metabolite reference directly (this always worked; pinning it so
+    the multicoil fix below can't regress it).
+    """
+    bS, num_bF, channels = 2, 3, 2
+    reference = torch.arange(1, bS * num_bF * channels + 1, dtype=torch.float32).reshape(bS, num_bF, channels, 1)
+    noise_std = torch.full((bS, channels, 1), 2.0)
+
+    out = PhysicsModel._scale_snr_reference(reference, noise_std, has_transients_axis=False)
+
+    assert out.shape == (bS, num_bF, channels, 1)
+    torch.testing.assert_close(out, reference / 2.0)
+
+
+def test_scale_snr_reference_multicoil_broadcasts_per_transient():
+    """
+    CRITICAL regression test (Milestone 11): multicoil case, where
+    noise_std carries its own transients axis. Before this fix, dividing
+    a per-metabolite reference by this noise_std crashed with a
+    broadcast-shape RuntimeError (the metabolite axis collided with the
+    transients axis). Also checks each transient gets divided by *its
+    own* noise_std value, not a shared/wrong one.
+    """
+    bS, num_bF, channels, transients = 2, 3, 2, 4
+    reference = torch.ones(bS, num_bF, channels, 1)
+    # Distinct noise_std per transient so incorrect broadcasting would be
+    # detectable: transient t has std = t + 1.
+    noise_std = torch.arange(1, transients + 1, dtype=torch.float32).view(1, transients, 1, 1)
+    noise_std = noise_std.expand(bS, transients, channels, 1).contiguous()
+
+    out = PhysicsModel._scale_snr_reference(reference, noise_std, has_transients_axis=True)
+
+    assert out.shape == (bS, transients, num_bF, channels, 1)
+    for t in range(transients):
+        expected = 1.0 / (t + 1)
+        torch.testing.assert_close(out[:, t], torch.full((bS, num_bF, channels, 1), expected))

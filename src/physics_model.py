@@ -1056,6 +1056,31 @@ class PhysicsModel(nn.Module):
             noisy = signal + noise_vec
         return torch.stack((noisy, signal), dim=dim)
 
+    @staticmethod
+    def _scale_snr_reference(reference: torch.Tensor,
+                             noise_std: torch.Tensor,
+                             has_transients_axis: bool,
+                            ) -> torch.Tensor:
+        '''
+        Divide a per-metabolite-line SNR reference value (pSNR/sSNR, shape
+        `[bS, num_bF, ..., 1]`, no transients axis) by `noise_std`
+        (`noise_vec.std(dim=-1, keepdims=True)`), inserting a transients
+        axis into `reference` only when `noise_std` actually has one.
+
+        BUGFIX (v2.0): the old code unconditionally did
+        `noise_std.unsqueeze(1)`, which only lines up correctly when
+        `noise_std` has exactly one fewer dimension than `reference` --
+        true for single-coil (`noise_std` is 3-D vs `reference`'s 4-D) but
+        not multicoil (`noise_std` is 4-D, *same* ndim as `reference`, so
+        `reference`'s per-metabolite axis collided with `noise_std`'s
+        transients axis during broadcasting) -- a hard crash, confirmed
+        independent of anything else in this refactor. See
+        docs/v2/progress_log.md, Milestone 11.
+        '''
+        if has_transients_axis:
+            return reference.unsqueeze(1) / noise_std.unsqueeze(2)
+        return reference / noise_std.unsqueeze(1)
+
     def refine_noise(self,
                      fid_shape, # fid.shape[-1]
                      ind: torch.Tensor,
@@ -1659,10 +1684,7 @@ class PhysicsModel(nn.Module):
             # blanket `.unsqueeze(1)`.
             has_transients_axis = noise_vec.ndim > 3
             noise_std = noise_vec.std(dim=-1, keepdims=True)
-            if has_transients_axis:
-                pSNR = pSNR.unsqueeze(1) / noise_std.unsqueeze(2)
-            else:
-                pSNR = pSNR / noise_std.unsqueeze(1)
+            pSNR = self._scale_snr_reference(pSNR, noise_std, has_transients_axis)
             # Spectral SNR (same fix as pSNR above, for the same reason)
             if has_transients_axis:
                 sSNR = sSNR.unsqueeze(1) / noise_std.unsqueeze(2)[...,0,:].unsqueeze(-2)
