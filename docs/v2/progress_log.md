@@ -963,6 +963,97 @@ isn't lost.
   -- only the specific equations the repo owner provided directly were
   used.
 
+## Milestone 14 — NIfTI-MRS export was completely broken (commit `1db69da`)
+
+**Handover section addressed**: 12 (NIfTI-MRS export audit).
+
+**Context**: continuing to the next suggested-order item after section
+10. Rather than only re-reading the code (already partly audited in
+Milestone 1), actually ran `Mat2NIfTI_MRS.forward()` end to end against a
+real simulated dataset for the first time this session -- and it crashed
+immediately, unconditionally, for every dataset.
+
+**Bug 1 -- `KeyError: 'dwelltime'`**: `write_NIfTIMRS()` reads
+`header['dwelltime']` directly, but a simulated dataset's saved header
+(`PhysicsModel.header`, loaded via `aux.convertdict()`) never has that
+key -- confirmed directly (`spectralwidth, carrier_frequency, Ns, t,
+centerFreq, B0, TE, basis_set_software, ppm` only). This crashed for
+*every* dataset, `noise=True` or `False`. Fixed by deriving it from
+`spectralwidth` (`dwelltime = 1/spectralwidth`) when absent.
+
+**Bug 2 -- axis misalignment for `noise=False` datasets, found via a
+false start worth recording**: fixing bug 1 revealed a second crash
+(`IndexError`) specifically for `noise=False` datasets, in the
+real/imaginary-combining line
+(`specDataCmplx[...,0,:] + 1j*specDataCmplx[...,1,:]`). My first
+hypothesis -- that this line's hardcoded `0`/`1` was itself wrong, meant
+to select the noisy/clean axis rather than real/imaginary -- was
+**incorrect, and the repo owner caught it immediately** ("no no no...
+That hard coded 2 should be for real/imaginary!"). Re-investigated and
+found the actual root cause one level up: `aux.loadmat_as_dict()` calls
+`scipy.io.loadmat(..., squeeze_me=True)`, which silently removes the
+noisy/clean axis entirely whenever it has size 1 (`noise=False`).
+Confirmed directly: a saved `spectra` shape `(2, 1, 2, 2048)` loads back
+as `(2, 2, 2048)`. Every index in `Mat2NIfTI_MRS.forward()` assumes axis 1
+is noisy/clean, so this silently shifted every later axis -- corrupting
+the label-based branch-selection logic first, then crashing the
+real/imaginary line (which was correct all along; it was just operating
+on a misaligned array by the time it ran). Fixed by explicitly restoring
+the squeezed-away axis (`np.expand_dims` when the loaded array comes back
+3-D) rather than changing `loadmat_as_dict()`'s shared default behavior,
+since other callers may depend on its current squeezing.
+
+**Bug 3 -- `RepetitionTime` spec violation**: confirmed against the actual
+NIfTI-MRS specification (wtclarke/mrs_nifti_standard, fetched directly)
+that `RepetitionTime` must be a *number* (seconds) when present, with
+`null` explicitly permitted for an unknown value -- the existing code used
+the *string* `'NA'`, a genuine type violation for any strict consumer. TR
+is not tracked anywhere in this codebase, so `None` (`-> null`) is the
+honest fix, not a fabricated numeric value.
+
+**Verified end to end** against a real simulated dataset (`cows.json`),
+for both `noise=True` and `noise=False`: export now completes
+successfully, writes a valid NIfTI-MRS file with `pixdim[4]` (dwelltime)
+matching `1/spectralwidth`, and the JSON header extension has
+`EchoTime=0.03` (correct) and `RepetitionTime=null` (correct, spec
+-compliant).
+
+**A fourth issue found, not fixed**: `test_output()`'s stricter
+self-consistency check (`test_nifti_mrs_conventions`) hardcodes an assumed
+dominant-peak location of 4.65 ppm regardless of what a given simulation
+actually contains -- its own inline comment already flags this ("set to
+your dominant simulated peak"). Not a crash in the core export path (only
+triggers when `test_output=True`); noted as a follow-up rather than fixed,
+since properly fixing it means threading the actual dominant/reference
+metabolite through the call chain, a design decision rather than a quick
+fix.
+
+**Behavior changes**: NIfTI-MRS export goes from "always crashes" to
+"works" -- this is by definition a large behavior change, but since it
+never previously completed successfully for any dataset, no existing
+output could have depended on the old (crashing) behavior.
+
+**Tests**: 4 new (`tests/test_nifti_export.py`), using a synthetic `.mat`
+fixture matching `mainFcns._save()`'s schema (no real basis set needed) --
+covering both the noisy/clean-axis-present and axis-squeezed-away cases,
+the dwelltime derivation, and the `RepetitionTime` null check. Full suite:
+104/104 passing.
+
+**Remaining/follow-up**:
+- The hardcoded 4.65 ppm dominant-peak assumption in
+  `test_output()`/`test_nifti_mrs_conventions` (issue 4 above).
+- The `>>1` vs `>1` bit-shift-instead-of-comparison pattern noted earlier
+  in `physics_model.py` also appears in `mat2niftimrs.py`
+  (`specDataCmplx.shape[1]>>1`) -- harmless by coincidence for the shape
+  values actually encountered (confirmed same reasoning as before: `x>>1`
+  and `x>1` agree for all non-negative integers), not fixed, purely a
+  readability concern.
+- No test yet for the `"noise_free"`/`"filtered"` `label`-based branch
+  selection in `forward()` (lines 51-57) -- `"filtered"` in particular
+  indexes a third branch (index 2) that only exists when the separate,
+  little-used `snr_filter` feature was active during simulation; not
+  exercised this session.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across
