@@ -15,7 +15,7 @@ from numpy import pi
 from .aux import *
 from .baselines import bounded_random_walk
 from .aux.interpolate import CubicHermiteMAkima as CubicHermiteInterp
-from .relaxation import t2_star_decay
+from .relaxation import t1_recovery, t1_star_recovery, t2_star_decay
 from types import SimpleNamespace
 from typing import List, Tuple
 
@@ -155,6 +155,7 @@ class PhysicsModel(nn.Module):
                    wrt_metab: str='PCr',
                    snr_metab: str=None,
                    V1_0: bool=True,
+                   t1_cfg: dict=None,
                   ) -> tuple:
         # # Sort metabs and group met vs mm/lip
         # print('PM.intialize.metab: ',metab) # correct
@@ -239,6 +240,30 @@ class PhysicsModel(nn.Module):
             lw = 1
             broaden = torch.exp(-lw*self.t).unsqueeze(-2).unsqueeze(0)
             self.syn_basis_fids *= broaden.expand_as(self.syn_basis_fids)
+
+        # v2.0 (handover section 10, repo-owner-requested T1/T1* config
+        # surface): opt-in, NOT active by default -- T1 relaxation data
+        # doesn't exist yet anywhere in metabolites_database.json (schema
+        # placeholders only; see src/metabolite_database.py's
+        # get_t1_range()). t1_cfg={'enabled': True, 'TR': <ms>,
+        # 'flip_angle': <degrees, optional>} wires plain T1 recovery (or,
+        # with flip_angle, the T1* apparent/steady-state Ernst-equation
+        # recovery -- see src/relaxation.py) into the per-metabolite
+        # amplitude scaling in forward(). Uses a single representative T1
+        # value per metabolite (the [min, max] database range's midpoint)
+        # rather than per-sample sampling like 'd'/T2 -- T1 is treated
+        # here as a known literature constant per metabolite/sequence, not
+        # something that needs per-instance statistical variation the way
+        # linewidth does; per-sample T1 heterogeneity (mirroring 'd') is a
+        # possible future extension once real distribution data exists.
+        # Attempting to enable this before real T1 data is populated fails
+        # loudly (MoietyRangeError from get_t1_range) rather than silently
+        # using a fabricated number.
+        self.t1_enabled, self.TR, self.flip_angle, t1_list = \
+            self._resolve_t1_config(t1_cfg, self._metab, self.ranges)
+        if self.t1_enabled:
+            self.register_buffer('t1_values',
+                                  torch.tensor(t1_list, dtype=torch.float32))
 
         '''
         if difference_editing:
@@ -1119,6 +1144,69 @@ class PhysicsModel(nn.Module):
             return reference.unsqueeze(1) / noise_std.unsqueeze(2)
         return reference / noise_std.unsqueeze(1)
 
+    @staticmethod
+    def _resolve_t1_config(t1_cfg: dict,
+                           metab_names: list,
+                           ranges: dict,
+                          ) -> tuple:
+        '''
+        Parse the opt-in `t1_cfg` config surface (handover section 10; see
+        `initialize()`'s docstring/comment for the full rationale) into
+        `(enabled, TR, flip_angle, t1_values)`. Extracted as a static,
+        `PhysicsModel`-instance-free method so it's directly testable
+        without constructing a full model (which needs a real basis-set
+        file -- see test_parameters.py's module docstring for why
+        committed tests avoid depending on one).
+
+        `t1_values` is `None` unless `enabled` is true, in which case it's
+        a list of per-metabolite T1 midpoints (ms), in the same order as
+        `metab_names` (matches `self._metab`'s order, which is also
+        `self.index['metabolites']`'s column order -- see `order_metab()`
+        in src/aux/aux.py). Raises `ValueError` if enabled without `TR`,
+        and propagates `MoietyRangeError` (from `get_t1_range()`) for any
+        metabolite lacking real T1 data -- by design, since the shipped
+        database has none yet (schema placeholders only).
+        '''
+        enabled = bool(t1_cfg and t1_cfg.get('enabled', False))
+        TR = float(t1_cfg['TR']) if t1_cfg and 'TR' in t1_cfg else None
+        flip_angle = (float(t1_cfg['flip_angle'])
+                      if t1_cfg and t1_cfg.get('flip_angle') is not None
+                      else None)
+        t1_values = None
+        if enabled:
+            if TR is None:
+                raise ValueError(
+                    "t1_cfg['enabled'] is True but 'TR' (ms) is missing.")
+            from .metabolite_database import get_t1_range
+            t1_values = []
+            for m in metab_names:
+                mins, maxs = get_t1_range(ranges, m, level='metab')
+                t1_values.append(0.5 * (mins[0] + maxs[0]))
+        return enabled, TR, flip_angle, t1_values
+
+    @staticmethod
+    def _apply_t1_scaling(amp: torch.Tensor,
+                          t1_values_ms: torch.Tensor,
+                          TR_ms: float,
+                          flip_angle: float = None,
+                         ) -> torch.Tensor:
+        '''
+        Scale per-metabolite amplitudes `amp` (shape `[bS, num_bF]`) by a
+        T1 recovery factor: plain T1 recovery (`src.relaxation.t1_recovery`)
+        by default, or the T1* apparent/steady-state Ernst-equation
+        recovery (`t1_star_recovery`) when `flip_angle` is given. Extracted
+        from `forward()` as a static method for direct testability (see
+        `_resolve_t1_config`'s docstring for why).
+        '''
+        TR_seconds = TR_ms / 1000.0
+        T1_seconds = t1_values_ms / 1000.0
+        if flip_angle is not None:
+            factor = t1_star_recovery(TR=TR_seconds, T1=T1_seconds,
+                                      flip_angle=flip_angle)
+        else:
+            factor = t1_recovery(TR=TR_seconds, T1=T1_seconds)
+        return amp * factor
+
     def refine_noise(self,
                      fid_shape, # fid.shape[-1]
                      ind: torch.Tensor,
@@ -1678,6 +1766,15 @@ class PhysicsModel(nn.Module):
             TE_seconds = self.TE / 1000.0
             d_per_line = params[:,self.index['d']]
             amp = amp * t2_star_decay(TE=TE_seconds, T2_star=1.0 / d_per_line)
+        if self.t1_enabled:
+            # Handover section 10, repo-owner-requested T1/T1* config
+            # surface (see initialize()'s t1_cfg comment for the full
+            # rationale) -- dormant until t1_cfg['enabled']=True, which
+            # cannot happen with the shipped database (T1 is all
+            # placeholders; see src/metabolite_database.py's
+            # get_t1_range()).
+            amp = self._apply_t1_scaling(amp, self.t1_values, self.TR,
+                                         self.flip_angle)
         fid = self.modulate(fids=self.syn_basis_fids,
                             params=amp)
         # print('modulate:: fid[...,0]: {}'.format(fid[0:7,0,0,0].squeeze()))

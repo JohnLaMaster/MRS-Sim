@@ -37,6 +37,7 @@ __all__ = [
     'validate_database',
     'get_concentration_range',
     'get_t2_range',
+    'get_t1_range',
     'get_omega',
     'apply_range_overrides',
 ]
@@ -117,6 +118,45 @@ def get_t2_range(db: dict, metabolite: str, level: str = 'metab') -> Tuple[List[
             f"T2.spins.max has {len(maxs)} -- inconsistent database entry, "
             f"refusing to guess which is correct. See "
             f"docs/v2/progress_log.md for known cases."
+        )
+    return mins, maxs
+
+
+def get_t1_range(db: dict, metabolite: str, level: str = 'metab') -> Tuple[List[float], List[float]]:
+    """
+    T1 range(s) for ``metabolite`` -- mirrors ``get_t2_range()``'s contract
+    (same ``level='metab'``/``'spins'`` split), for the opt-in T1/T1*
+    relaxation feature (see ``src/relaxation.py`` and
+    ``PhysicsModel``'s ``t1_cfg``).
+
+    T1 relaxation data is not yet populated anywhere in
+    ``metabolites_database.json`` -- every entry has a ``'T1'`` block with
+    ``min``/``max`` as JSON ``null`` (schema placeholders only, added at
+    the repo owner's request so real literature/fitted values can be
+    filled in later; see docs/v2/progress_log.md). Raises
+    ``MoietyRangeError`` for any metabolite until real values are
+    supplied, rather than defaulting to or fabricating a number -- this is
+    what keeps T1/T1* relaxation from being silently enabled with made-up
+    data before it's actually available.
+    """
+    if level not in ('metab', 'spins'):
+        raise ValueError(f"level must be 'metab' or 'spins', got {level!r}.")
+    entry = _entry(db, metabolite)
+    t1 = entry.get('T1', {})
+    block = t1.get(level)
+    if not block or block.get('min') is None or block.get('max') is None:
+        raise MoietyRangeError(
+            f"'{metabolite}' has no T1.{level} data yet -- "
+            f"metabolites_database.json only has schema placeholders "
+            f"(min/max: null) for T1 until real values are supplied. "
+            f"See docs/v2/progress_log.md."
+        )
+    mins, maxs = list(block['min']), list(block['max'])
+    if level == 'spins' and len(mins) != len(maxs):
+        raise MoietyRangeError(
+            f"'{metabolite}': T1.spins.min has {len(mins)} entries but "
+            f"T1.spins.max has {len(maxs)} -- inconsistent database entry, "
+            f"refusing to guess which is correct."
         )
     return mins, maxs
 

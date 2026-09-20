@@ -7,6 +7,8 @@
                          "max": [0]},
                "metab": {"min": [0],
                          "max": [0]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0],
                  "max": [0]}},
     "ala": {
@@ -17,6 +19,8 @@
                          "max": [250.0, 250.0, 250.0, 250.0]},
                "metab": {"min": [100],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.090],
                  "max": [1.650]}},
     "asc": {
@@ -27,6 +31,8 @@
                          "max": [250.0, 250.0, 250.0, 250.0]},
                "metab": {"min": [100],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.367],
                  "max": [2.072]}},
     "asp": {
@@ -37,6 +43,8 @@
                          "max": [204.55, 204.55, 204.55]},
                "metab": {"min": [120.15],
                          "max": [204.55]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.90],
                  "max": [7.668]}},
     "2hg": {
@@ -47,6 +55,8 @@
                          "max": [0, 0, 0, 0, 0]},
                "metab": {"min": [0],
                          "max": [0]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0],
                  "max": [0]}},
     "ch": {
@@ -57,6 +67,8 @@
                          "max": [394, 345, 345, 345, 345]},
                "metab": {"min": [93],
                          "max": [345]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.45],
                  "max": [2.75]}},
     "cr": {
@@ -67,6 +79,8 @@
                          "max": [242.7, 213.8, 242.7]},
                "metab": {"min": [104],
                          "max": [242.7]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.325],
                  "max": [16.505]}},
     "cr_split": {
@@ -75,6 +89,8 @@
                          "max": [242.7, 242.7]},
                "metab": {"min": [104],
                          "max": [242.7]}},
+        "T1": {"spins": {"min": null, "max": null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.325],
                  "max": [16.505]}},
     "crch2": {
@@ -83,6 +99,8 @@
                          "max": [213.8]},
                "metab": {"min": [104],
                          "max": [242.7]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.325],
                  "max": [16.505]}},
     "eth": {
@@ -91,6 +109,8 @@
                          "max": [0, 0, 0, 0]},
                "metab": {"min": [0],
                          "max": [0]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0],
                  "max": [1.65]}},
     "gaba": {
@@ -99,6 +119,8 @@
                          "max": [229, 229, 229, 229, 229, 229]},
                "metab": {"min": [77.37],
                          "max": [161.77]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.033],
                  "max": [10.720]}},
     "glc": {
@@ -107,6 +129,8 @@
                          "max": [250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250]},
                "metab": {"min": [100],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0],
                  "max": [2.2]}},
     "gln": {
@@ -115,6 +139,8 @@
                          "max": [234, 234, 234, 234, 234, 234, 234]},
                "metab": {"min": [103.96],
                          "max": [184.89]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [2.70],
                  "max": [6.60]}},
     "glu": {
@@ -123,6 +149,8 @@
                          "max": [219.580, 219.580, 219.580, 219.580, 219.580]},
                "metab": {"min": [140.96],
                          "max": [219.58]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [2.692],
                  "max": [20.774]}},
     "gly": {
@@ -131,6 +159,8 @@
                          "max": [206]},
                "metab": {"min": [28],
                          "max": [206]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.820],
                  "max": [2.395]}},
     "glyc": {
@@ -139,6 +169,8 @@
                          "max": [0, 0, 0, 0, 0]},
                "metab": {"min": [0],
                          "max": [0]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0],
                  "max": [0]}},
     "gpc": {
@@ -151,6 +183,8 @@
                          "max": [371, 371, 371, 371, 371, 396, 396, 396, 396, 396]},
                "metab": {"min": [198.77],
                          "max": [278.54]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.033],
                  "max": [10.720]}},
     "gsh": {
@@ -163,6 +197,8 @@
                          "max": [188.36, 188.36, 188.36, 188.36, 188.36, 188.36, 225, 225, 225, 225, 225]},
                "metab": {"min": [108.59],
                          "max": [188.36]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.118],
                  "max": [3.804]}},
     "hom": {
@@ -171,6 +207,8 @@
                          "max": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]},
                "metab": {"min": [0],
                          "max": [0]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.09],
                  "max": [0.440]}},
     "lac": {
@@ -179,6 +217,8 @@
                          "max": [226.52, 226.52, 226.52, 226.52]},
                "metab": {"min": [142.12],
                          "max": [226.52]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.18],
                  "max": [15.824]}},
     "mi": {
@@ -187,6 +227,8 @@
                          "max": [439, 439, 439, 439, 439, 439]},
                "metab": {"min": [139.8],
                          "max": [219.58]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1.380],
                  "max": [23.393]}},
     "naa": {
@@ -195,6 +237,8 @@
                          "max": [411, 376, 376, 376, 376, 320.170]},
                "metab": {"min": [242.7],
                          "max": [320.17]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.09],
                  "max": [0.440]}},
     "naag": {
@@ -203,6 +247,8 @@
                          "max": [216.11, 216.11, 216.11, 216.11, 216.11, 229, 234, 234, 234]},
                "metab": {"min": [132.87],
                          "max": [216.11]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.450],
                  "max": [2.750]}},
     "pa": {
@@ -211,6 +257,8 @@
                          "max": [0, 0, 0, 0, 0, 0, 0, 0]},
                "metab": {"min": [0],
                          "max": [0]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.09],
                  "max": [0.440]}},
     "pch": {
@@ -219,6 +267,8 @@
                          "max": [345, 345, 345, 345, 394]},
                "metab": {"min": [100],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.0007],
                  "max": [4.288]}},
     "pcr": {
@@ -227,6 +277,8 @@
                          "max": [210, 180, 210, 210]},
                "metab": {"min": [100],
                          "max": [210]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.779],
                  "max": [10.123]}},
     "pe": {
@@ -235,6 +287,8 @@
                          "max": [250, 250, 250, 250]},
                "metab": {"min": [34],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.09],
                  "max": [2.20]}},
     "pyr": {
@@ -243,6 +297,8 @@
                          "max": [250]},
                "metab": {"min": [100],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.09],
                  "max": [0.55]}},
     "si": {
@@ -251,6 +307,8 @@
                          "max": [250]},
                "metab": {"min": [73],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.09],
                  "max": [0.563]}},
     "ser": {
@@ -259,6 +317,8 @@
                          "max": [250, 250, 250]},
                "metab": {"min": [100],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.09],
                  "max": [2.20]}},
     "tau": {
@@ -267,6 +327,8 @@
                          "max": [231.14, 231.14, 231.14, 231.14]},
                "metab": {"min": [66],
                          "max": [231.14]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.09],
                  "max": [6.60]}},
     "thr": {
@@ -275,6 +337,8 @@
                          "max": [250, 250, 250, 250, 250]},
                "metab": {"min": [100],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0.09],
                  "max": [0.55]}},
     "try": {
@@ -283,6 +347,8 @@
                          "max": [250, 250, 250, 250, 250, 250, 250, 250]},
                "metab": {"min": [100],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0],
                  "max": [0]}},
     "tyr": {
@@ -291,6 +357,8 @@
                          "max": [250, 250, 250, 250, 250, 250, 250]},
                "metab": {"min": [100],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0],
                  "max": [0]}},
     "val": {
@@ -299,6 +367,8 @@
                          "max": [250, 250, 250, 250]},
                "metab": {"min": [100],
                          "max": [250]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0],
                  "max": [0]}},
     "water": {
@@ -307,6 +377,8 @@
                          "max": [120]},
                "metab": {"min": [70],
                          "max": [120]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [0],
                  "max": [1]}},
     "mm092": {
@@ -315,6 +387,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [33]}},
     "mm121": {
@@ -323,6 +397,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [9]}},
     "mm139": {
@@ -331,6 +407,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [39]}},
     "mm167": {
@@ -339,6 +417,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [17]}},
     "mm204": {
@@ -347,6 +427,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [39]}},
     "mm226": {
@@ -355,6 +437,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [22]}},
     "mm270": {
@@ -363,6 +447,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [8]}},
     "mm299": {
@@ -371,6 +457,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [11]}},
     "mm321": {
@@ -379,6 +467,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [8]}},
     "mm375": {
@@ -387,6 +477,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [11]}},
     "mm09": {
@@ -395,6 +487,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [33]}},
     "mm12": {
@@ -403,6 +497,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [9]}},
     "mm14": {
@@ -411,6 +507,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [39]}},
     "mm17": {
@@ -419,6 +517,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [17]}},
     "mm20": {
@@ -427,6 +527,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [39]}},
     "lip09": {
@@ -435,6 +537,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                 "max": [10]}},
     "lip13": {
@@ -443,6 +547,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [77]}},
     "lip20": {
@@ -451,6 +557,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [13]}},
     "lip21": {
@@ -459,6 +567,8 @@
                          "max": [60]},
                "metab": {"min": [20],
                          "max": [60]}},
+        "T1": {"spins": {"min": null, "max":null}, 
+               "metab": {"min": null, "max": null}},
         "Conc": {"min": [1],
                  "max": [13]}}
 }

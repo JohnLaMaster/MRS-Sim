@@ -8,9 +8,14 @@ basis-set .mat file -- not tracked in git, see test_parameters.py's module
 docstring). Coverage requiring a real basis set is verified manually and
 recorded in docs/v2/progress_log.md instead.
 """
+import math
+
+import pytest
 import torch
 
+from src.metabolite_database import MoietyRangeError
 from src.physics_model import PhysicsModel
+from src.relaxation import t1_recovery, t1_star_recovery
 
 
 def test_stack_noisy_clean_leaves_clean_branch_unmodified():
@@ -125,3 +130,82 @@ def test_scale_snr_reference_multicoil_broadcasts_per_transient():
     for t in range(transients):
         expected = 1.0 / (t + 1)
         torch.testing.assert_close(out[:, t], torch.full((bS, num_bF, channels, 1), expected))
+
+
+# ---------------------------------------------------------------------------
+# Opt-in T1/T1* config surface (handover section 10, repo-owner request).
+# Not active with the shipped database (T1 is all schema placeholders --
+# see src/metabolite_database.py's get_t1_range()); these test the parsing
+# and amplitude-scaling logic directly, without constructing a full
+# PhysicsModel (needs a real basis-set file).
+# ---------------------------------------------------------------------------
+
+def test_resolve_t1_config_disabled_by_default():
+    enabled, TR, flip_angle, t1_values = PhysicsModel._resolve_t1_config(
+        None, ['naa'], {'naa': {'T1': {'metab': {'min': None, 'max': None}}}})
+    assert enabled is False
+    assert TR is None
+    assert flip_angle is None
+    assert t1_values is None
+
+
+def test_resolve_t1_config_raises_for_shipped_database_placeholders():
+    """The shipped metabolites_database.json has T1: null for everything
+    -- enabling t1_cfg against it must fail loudly, not silently proceed."""
+    ranges = {'naa': {'T1': {'metab': {'min': None, 'max': None}}}}
+    with pytest.raises(MoietyRangeError):
+        PhysicsModel._resolve_t1_config({'enabled': True, 'TR': 2000.0},
+                                        ['naa'], ranges)
+
+
+def test_resolve_t1_config_enabled_without_tr_raises():
+    ranges = {'naa': {'T1': {'metab': {'min': [1100], 'max': [1500]}}}}
+    with pytest.raises(ValueError):
+        PhysicsModel._resolve_t1_config({'enabled': True}, ['naa'], ranges)
+
+
+def test_resolve_t1_config_uses_database_midpoint_once_populated():
+    ranges = {
+        'naa': {'T1': {'metab': {'min': [1100], 'max': [1500]}}},
+        'cr': {'T1': {'metab': {'min': [1300], 'max': [1300]}}},
+    }
+    enabled, TR, flip_angle, t1_values = PhysicsModel._resolve_t1_config(
+        {'enabled': True, 'TR': 2000.0}, ['naa', 'cr'], ranges)
+    assert enabled is True
+    assert TR == 2000.0
+    assert flip_angle is None
+    assert t1_values == [1300.0, 1300.0]  # naa midpoint=(1100+1500)/2=1300
+
+
+def test_resolve_t1_config_parses_optional_flip_angle():
+    ranges = {'naa': {'T1': {'metab': {'min': [1200], 'max': [1200]}}}}
+    enabled, TR, flip_angle, t1_values = PhysicsModel._resolve_t1_config(
+        {'enabled': True, 'TR': 2000.0, 'flip_angle': 90.0}, ['naa'], ranges)
+    assert flip_angle == 90.0
+
+
+def test_apply_t1_scaling_matches_plain_t1_recovery():
+    amp = torch.tensor([[1.0, 2.0]])
+    t1_values_ms = torch.tensor([1000.0, 1500.0])
+    TR_ms = 2000.0
+
+    out = PhysicsModel._apply_t1_scaling(amp, t1_values_ms, TR_ms)
+
+    expected_factor = t1_recovery(TR=TR_ms / 1000.0, T1=t1_values_ms / 1000.0)
+    torch.testing.assert_close(out, amp * expected_factor)
+
+
+def test_apply_t1_scaling_uses_t1_star_when_flip_angle_given():
+    amp = torch.tensor([[1.0, 2.0]])
+    t1_values_ms = torch.tensor([1000.0, 1500.0])
+    TR_ms = 2000.0
+    flip_angle = 60.0
+
+    out = PhysicsModel._apply_t1_scaling(amp, t1_values_ms, TR_ms, flip_angle)
+
+    expected_factor = t1_star_recovery(TR=TR_ms / 1000.0, T1=t1_values_ms / 1000.0,
+                                       flip_angle=flip_angle)
+    torch.testing.assert_close(out, amp * expected_factor)
+    # Sanity: T1* and plain T1 recovery genuinely differ away from 90 degrees
+    plain_factor = t1_recovery(TR=TR_ms / 1000.0, T1=t1_values_ms / 1000.0)
+    assert not torch.allclose(expected_factor, plain_factor)

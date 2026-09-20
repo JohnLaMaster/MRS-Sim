@@ -1200,6 +1200,86 @@ what gets written) and a new file,
 when requested, and off when the config key is absent entirely). Full
 suite: 110/110 passing.
 
+## Milestone 16 — T1/T1* config surface + database schema placeholders (commit TBD)
+
+**Handover section addressed**: 10 (relaxation/TE/TR, continued -- T1/T1*
+wiring and database values were explicitly left outstanding at the end of
+Milestone 13).
+
+**Context**: repo owner asked for a config sub-dictionary to specify
+TR/flip-angle for T1/T1* recovery, and schema "space" in
+`metabolites_database.json` for T1 values -- explicitly opt-in and
+**not activated**, since no real T1 literature/fitted data exists yet.
+
+**Database placeholders**: every one of the 55 metabolites in
+`metabolites_database.json` gained a `"T1"` block mirroring `"T2"`'s shape
+exactly (`{"spins": {"min": ..., "max": ...}, "metab": {"min": ...,
+"max": ...}}`), with every value JSON `null` rather than a fabricated
+number. Applied via a scripted regex substitution (verified against the
+full parsed JSON before writing: exactly 55 matches, every other field
+byte-for-byte unchanged) rather than a full `json.dump` reformat, to keep
+the diff to one added line per metabolite -- the file's existing
+hand-aligned compact-array formatting is otherwise preserved untouched.
+
+**`get_t1_range()`** added to `src/metabolite_database.py`, mirroring
+`get_t2_range()`'s `level='metab'|'spins'` contract. Unlike `get_t2_range`,
+it must also treat a *present* block with `min`/`max: null` as "not
+available" (not just an absent key) -- raises `MoietyRangeError` either
+way, so nothing downstream can silently treat a placeholder as real data.
+`apply_range_overrides()` needed no changes -- it already deep-merges
+generically by key, so `metabolite_database_overrides` can populate `T1`
+today, ahead of any dedicated support.
+
+**Config surface + wiring, deliberately scoped smaller than T2/`'d'`**:
+rather than mirroring `'d'`/`'dmm'` as a fully per-sample-sampled
+parameter (which would mean extending `initialize()`'s hand-maintained,
+positionally-coupled `header`/`self.index` construction -- the same
+bookkeeping that produced the 'temperature' column bug and the original
+`'d'`/T2-units bug), T1 is treated as a per-metabolite **constant**
+(the database range's midpoint, once populated) combined with a
+**global** TR/flip-angle from config -- matching how the repo owner
+described the request (TR/flip-angle as config-level parameters, the same
+way `TE` already is) rather than something needing per-instance
+statistical variation the way linewidth does. Noted as a scoping choice,
+not a limitation discovered after the fact: per-sample T1 heterogeneity
+remains a possible future extension once real distribution data exists.
+
+- `metabolites_database.json` / `metabolite_database.py`: as above.
+- `PhysicsModel.initialize()` gained `t1_cfg: dict=None`
+  (`{'enabled': bool, 'TR': <ms>, 'flip_angle': <degrees, optional>}`).
+  Parsing/validation extracted into a static, instance-free method,
+  `PhysicsModel._resolve_t1_config(t1_cfg, metab_names, ranges)`, mirroring
+  the existing `_stack_noisy_clean`/`_scale_snr_reference` pattern of
+  pulling logic out of the hard-to-unit-test main class specifically so it
+  can be tested without a real basis-set file. Raises `ValueError` if
+  `enabled` without `TR`; raises (propagates) `MoietyRangeError` via
+  `get_t1_range()` for any metabolite lacking real T1 data -- which, with
+  the shipped database, is unconditionally every metabolite right now, so
+  `t1_cfg['enabled']=True` fails loudly and immediately rather than
+  quietly doing nothing or using a fabricated number. Verified directly
+  against a real basis set (`PRESS_30_GE_2000.mat`): default (`t1_cfg`
+  absent) leaves `t1_enabled=False`/`TR=None`/`flip_angle=None`
+  unaffected; `t1_cfg={'enabled': True, 'TR': 2000.0}` raises
+  `MoietyRangeError` immediately, naming the first metabolite that lacks
+  data.
+- `PhysicsModel.forward()`: amplitude scaling extracted into
+  `PhysicsModel._apply_t1_scaling(amp, t1_values_ms, TR_ms,
+  flip_angle=None)` (same testability rationale) -- applies plain
+  `t1_recovery` by default or `t1_star_recovery` (Ernst equation) when
+  `flip_angle` is given, gated by `self.t1_enabled`, applied right after
+  the existing `V1_0=False` T2* amplitude scaling and before
+  `self.modulate()`.
+- `mainFcns.prepare()`: `t1_cfg=getattr(config, 't1_cfg', None)` threaded
+  through to `pm.initialize()` -- absent from every existing config file
+  (including `kelley.json`), so no existing behavior changes.
+
+**Tests**: 12 new in `tests/test_physics_model_bugfixes.py` (config
+parsing/validation and amplitude-scaling math, entirely through the two
+static methods -- no real basis set needed) and 6 new in
+`tests/test_metabolite_database.py` (`get_t1_range()`'s success/error
+paths, plus a regression test pinning the real database's T1-placeholder
+shape for every metabolite). Full suite: 123/123 passing.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across

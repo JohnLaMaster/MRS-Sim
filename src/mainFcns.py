@@ -64,7 +64,12 @@ def prepare(config_file):
                   # config to use the corrected behavior. See
                   # PhysicsModel.initialize()'s docstring/comment and
                   # docs/v2/progress_log.md.
-                  V1_0=getattr(config, 'V1_0', True),)
+                  V1_0=getattr(config, 'V1_0', True),
+                  # v2.0: opt-in T1/T1* config surface, absent/disabled by
+                  # default -- see PhysicsModel.initialize()'s t1_cfg
+                  # comment. Not usable with the shipped database yet
+                  # (T1 values are schema placeholders only).
+                  t1_cfg=getattr(config, 't1_cfg', None),)
     config.header = pm.header
 
     # print(pm.index)
