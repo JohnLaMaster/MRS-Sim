@@ -826,6 +826,118 @@ call).
 Full suite: 84/84 passing. Committed to a clean state before the repo
 owner disconnected (push is theirs to do, per their standing preference).
 
+## Milestone 13 — Relaxation equations, a real 'd'/T2 units bug, T2* wiring (commits `84a981d`, `2c9486b`, `f6017fe`)
+
+**Handover section addressed**: 10 (relaxation and acquisition parameters).
+
+**Finding the actual equations**: the handover doc pointed at "Table 1" of
+"Synthetic Data in MR Spectroscopy: Current Practices, Applications, and
+Considerations" for the T1/T1*/T2/T2* equations, with an explicit "do not
+rely on memory" instruction. Found the paper on arXiv (2602.23463) --
+confirmed the repo owner is its first author. Fetched and read the full
+100-page PDF directly (not just the abstract): its metadata states
+**"Table Count: 0 (All 6 tables are in the supplement)"**, and the main-text
+section that discusses relaxation (2.3.2) is a narrative review of how
+*other* existing simulators handle T1/T2, not a specification. A full-text
+search of all 100 pages found no table literally named "Table 1" -- only
+Supplementary Tables S1-S4, none of which (based on surrounding context)
+appear to be about relaxation equations. Reported this discrepancy to the
+repo owner rather than guessing at a table I couldn't verify existed in
+the form described; they provided Table 1's content directly (their own
+paper's supplement, transcribed from memory during our conversation).
+
+**The four equations** (`src/relaxation.py`, commit `84a981d`):
+```
+T1:  M0 * (1 - exp(-TR/T1))
+T1*: M0 * (1 - exp(-TR/T1)) / (1 - cos(theta)*exp(-TR/T1)) * sin(theta)
+     (Kaptein et al. 1976, Taylor et al. 2016 -- SPGR/Ernst steady-state)
+T2:  M0 * exp(-TE/T2)
+T2*: M0 * exp(-TE/T2*)
+```
+Pure, stateless, torch/scalar-compatible functions. 16 tests including
+physical sanity checks (T1* at 90 degrees reduces exactly to plain T1
+recovery; 0-degree flip angle gives 0 signal; TE/TR limiting behavior at
+0 and infinity).
+
+**A real, severe, independently-found bug** (commit `2c9486b`): while
+assessing whether wiring in T2*-based amplitude scaling would double-count
+with the existing sampled 'd' (Lorentzian decay rate) parameter, found
+that `define_parameter_ranges()` sets 'd''s default sampling range
+**directly from `T2.metab` values in milliseconds** (e.g. NAA:
+242.7-320.17), used unconverted as a per-second decay rate in
+`exp(-d * self.t)` -- but `self.t` is confirmed in **seconds** (range
+matches `Ns/spectralwidth`, ~0.68s for `cows.json`). This made every
+sampled 'd' from the default range ~1000x too large: `exp(-250*0.68) =
+exp(-170)`, decaying every metabolite to numerically zero within
+microseconds instead of producing a normal, visible lineshape. Only
+affects the plain/uniform default sampler path
+(`PhysicsModel.quantify_params()` / `UniformRangeSampler`) --
+`sim_COWS.py`'s copula sampler sets 'd' directly from real fitted in-vivo
+values, bypassing this broken range entirely, which is presumably why it
+had gone unnoticed. Fixed by converting the T2 millisecond range into a
+proper decay-rate range (`rate = 1000 / T2_ms`). Verified: NAA's 'd' range
+is now `[3.12, 4.12]` (1/s) instead of `[242.7, 320.17]`, giving decay
+factors of 6-12% at the end of the readout (a normal lineshape) instead
+of ~0; a full `forward()` pass with `UniformRangeSampler` now produces a
+real, nonzero spectrum.
+
+**T2* wiring** (commit `f6017fe`): resolved the double-counting question
+by recognizing the two effects are genuinely distinct -- the existing 'd'
+(now correctly unitted) governs decay *during* the readout (t >= TE,
+shaping linewidth), while the paper's T2/T2* equation governs signal lost
+*before* TE (an amplitude bias the pipeline never modeled at all: basis
+FIDs implicitly assume t=0 is the echo itself). Wired as
+`amp *= exp(-TE * d)` (equivalently `t2_star_decay(TE, T2_star=1/d)`,
+reusing the already-sampled 'd' rather than adding a new parameter),
+applied to `params[:,ind['metabolites']]` before `modulate()`, gated by
+`V1_0=False` -- `V1_0=True` (default) is completely unaffected.
+
+**Another inconsistency found along the way, used but not separately
+fixed**: `self.TE` (used for the T2* scaling) is a registered buffer
+aliasing the basis set's own `header['TE']`, **not**
+`PhysicsModel.__init__()`'s `TE` constructor argument, which is never
+actually stored as an instance attribute at all. Confirmed directly for
+`cows.json`: `config.TE = 26` but `pm.TE = 30` (the basis set's own
+baked-in value). The config's TE is silently unused. Used the basis set's
+own TE for the new scaling (the physically authoritative choice -- it's
+the echo time the basis functions were actually simulated at), but the
+`config.TE` field being dead weight is a separate, pre-existing issue not
+fixed here.
+
+**Verified end to end** against `cows.json`'s real basis set: `V1_0=True`
+output is byte-identical to before this milestone; `V1_0=False` produces
+a genuinely different spectrum (~11% relative difference -- real
+per-metabolite reweighting, not just a global scale change that
+normalization would hide); the exact scaling factor for a specific
+metabolite (NAA: d=4.11/s, TE=30ms -> 0.884) matches the formula by hand
+calculation.
+
+**Behavior changes**: none for `V1_0=True` (default). `V1_0=False`'s
+output changes meaningfully (as intended -- that's the corrected-physics
+opt-in path). The 'd' units fix changes `UniformRangeSampler`-based
+sampling's default 'd' range regardless of `V1_0` (this is an unambiguous
+bug fix, not gated -- the old range was never usable for anything, always
+decaying metabolites to zero).
+
+**Tests**: 16 new (`test_relaxation.py`). No new test added for the T2*
+wiring itself or the 'd' units fix (both verified manually against the
+real basis set; both need a real `PhysicsModel` to exercise meaningfully,
+consistent with the established pattern for basis-set-dependent changes).
+Full suite: 100/100 passing throughout.
+
+**Remaining/follow-up (section 10)**:
+- T1/T1* wiring is not done: needs genuinely new config surface (TR,
+  flip angle) and T1 database values that don't exist anywhere yet (no
+  literature source available to populate them without fabricating data,
+  per the "do not fabricate" principle carried over from section 18's
+  discussion).
+- `config.TE` being silently unused/inconsistent with the basis set's own
+  TE is a separate, pre-existing issue, noted but not fixed.
+- The paper's supplementary tables (S1-S4) and the rest of Table 1's
+  context remain otherwise unverified/inaccessible from this environment
+  -- only the specific equations the repo owner provided directly were
+  used.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across
@@ -849,14 +961,19 @@ listed in Milestone 9 above; full MRSsynMRS auto-population still needs
 per-dataset human input for fields MRS-Sim cannot know, and provenance is
 a standalone opt-in utility rather than wired into SimulationResult.
 
-**Also newly known but not yet started**: the multicoil (`num_coils>1`)
-path is currently unusable end-to-end -- `generate_noise()` crashes with a
-shape-mismatch `RuntimeError` for it (found during Milestone 8's
-verification), independent of that milestone's fix. The repo owner's open
-question about unconditionally adding transients (and other) axes
-everywhere, rather than conditionally, is also unresolved (Milestone 8).
-Three open design questions about parameter-range/distribution definition
+**Update**: the multicoil (`num_coils>1`) path noted above as unusable is
+now fully fixed as of Milestone 11 (commit `d31bebf`) -- see that
+milestone for details. The repo owner's open question about
+unconditionally adding transients (and other) axes everywhere, rather
+than conditionally, remains unresolved/undecided (Milestone 8). Three
+open design questions about parameter-range/distribution definition
 (config `"parameters"` blocks vs. basis-set defaults vs. direct numerical-
 space distributions, and generalizing config-declared distributions
 beyond `CopulaInVivoSampler`) are recorded above, raised by the repo owner
 but not yet acted on.
+
+**Section 10 (relaxation/TE/TR)** is partially done as of Milestone 13:
+the T1/T1*/T2/T2* equations are implemented and tested, the `V1_0` flag
+exists, and T2* amplitude scaling is wired in behind `V1_0=False`. T1/T1*
+wiring, TR/flip-angle config surface, and T1 database values remain
+outstanding -- see Milestone 13's "Remaining/follow-up" for specifics.
