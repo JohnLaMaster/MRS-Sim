@@ -412,7 +412,7 @@ class PhysicsModel(nn.Module):
         # Zero-Order phase unalignment
         ind.append(tuple(int(cnt(1)) for _ in torch.arange(0,num_coils)))
 
-        # ind.append(cnt(1)) # Temperature
+        # ind.append(cnt(1)) # Temperature 
 
         # # Cummulative
         total = cnt(1)
@@ -1226,6 +1226,28 @@ class PhysicsModel(nn.Module):
         return amp * factor
 
     @staticmethod
+    def _split_metab_mm_columns(cols, n_mm_lines: int) -> tuple:
+        '''
+        Split a combined per-line column index (e.g. self.index['g']) into
+        its `(metabolite_columns, mm_lipid_columns)` parts, using
+        self._metab's known ordering: real metabolites first, then MM/
+        lipid (order_metab(), src/aux/aux.py) -- so the trailing
+        `n_mm_lines` entries of `cols` are MM/lipid, the rest metabolites.
+        Both returned as plain lists (possibly empty), ready to index a
+        tensor with. `n_mm_lines` is `self.MM` (0/False if there are none).
+
+        Extracted as a static, PhysicsModel-instance-free method (shared
+        by `set_parameter_constraints()` and `_check_g_b0_double_counting`)
+        so it's directly testable without constructing a full model (needs
+        a real basis-set file -- see test_parameters.py's module
+        docstring), and so both call sites agree on the same split.
+        '''
+        n_metab_lines = len(cols) - n_mm_lines
+        metab_cols = list(cols[:n_metab_lines]) if n_metab_lines else []
+        mm_cols = list(cols[n_metab_lines:]) if n_mm_lines else []
+        return metab_cols, mm_cols
+
+    @staticmethod
     def _check_g_b0_double_counting(g_cols, n_mm_lines: int,
                                     max_ranges: torch.Tensor) -> None:
         '''
@@ -1236,20 +1258,13 @@ class PhysicsModel(nn.Module):
         forward()'s call site comment and docs/v2/progress_log.md, section
         11 audit). MM/lipid lines are exempt per the repo owner directly.
 
-        `g_cols`: self.index['g'], every line in self._metab's order
-        (real metabolites first, then MM/lipid -- order_metab(), src/aux/
-        aux.py). `n_mm_lines`: self.MM (0/False if there are none) -- the
-        trailing this-many entries of `g_cols` are MM/lipid, exempt.
-        `max_ranges`: self.max_ranges (checked, not a specific sampled
-        batch's values, so this is deterministic given the config).
-
-        Extracted as a static, PhysicsModel-instance-free method so it's
-        directly testable without constructing a full model (needs a real
-        basis-set file -- see test_parameters.py's module docstring).
+        `g_cols`: self.index['g']. `n_mm_lines`: self.MM (0/False if there
+        are none) -- see `_split_metab_mm_columns`. `max_ranges`:
+        self.max_ranges (checked, not a specific sampled batch's values,
+        so this is deterministic given the config).
         '''
-        n_metab_lines = len(g_cols) - n_mm_lines
-        metab_g_cols = g_cols[:n_metab_lines] if n_metab_lines else ()
-        if metab_g_cols and torch.any(max_ranges[0, list(metab_g_cols)] != 0):
+        metab_g_cols, _ = PhysicsModel._split_metab_mm_columns(g_cols, n_mm_lines)
+        if metab_g_cols and torch.any(max_ranges[0, metab_g_cols] != 0):
             raise ValueError(
                 "b0=True (explicit spatial B0 field-inhomogeneity "
                 "simulation) and a nonzero 'g' range for METABOLITE "
@@ -1636,7 +1651,42 @@ class PhysicsModel(nn.Module):
     def set_parameter_constraints(self, cfg: dict):
         cfg_keys = [k.lower() for k in cfg.keys()]
 
+        # v2.0 (handover section 11 follow-up): 'g' (metabolite Gaussian
+        # broadening) and 'gmm' (MM/lipid) share ONE combined per-line
+        # array, self.index['g'] -- there is no separate self.index['gmm']
+        # (metabolite lines first, then MM/lipid -- order_metab(), src/
+        # aux/aux.py). Per the repo owner directly: this and 'd'/'dmm'
+        # were never a bug -- config-driven parameter sampling was an
+        # implementation the repo owner started but never finished (their
+        # own workflows define sampling directly in Python, e.g.
+        # sim_COWS.py), which is why "_g"/"_gmm" (with a leading
+        # underscore) never matched anything here. 'g'/'gmm' are wired up
+        # now (as a config convenience); 'd'/'dmm' are deliberately left
+        # as-is, since 'd' already gets a scientifically-grounded, per-
+        # metabolite default from the basis-set's own T2 database in
+        # define_parameter_ranges() -- overriding that with one uniform
+        # config-wide range would be a bigger, separate change.
+        #
+        # Per the repo owner's explicit instruction: keep this as ONE
+        # grouped tensor array (writing into different slices of the same
+        # self.min_ranges/max_ranges at self.index['g']'s column
+        # positions), not a second index or a second lineshape-correction
+        # call for MM/lipid.
+        if 'g' in self._index and ('g' in cfg_keys or 'gmm' in cfg_keys):
+            metab_cols, mm_cols = PhysicsModel._split_metab_mm_columns(
+                self._index['g'], self.MM if self.MM else 0)
+            if 'g' in cfg_keys and metab_cols:
+                self.min_ranges[:, metab_cols] = cfg['g'][0]
+                self.max_ranges[:, metab_cols] = cfg['g'][1]
+            if 'gmm' in cfg_keys and mm_cols:
+                self.min_ranges[:, mm_cols] = cfg['gmm'][0]
+                self.max_ranges[:, mm_cols] = cfg['gmm'][1]
+            if 'g' in self.new_params.keys():
+                self.new_params.pop('g')
+
         for k, ind in self._index.items():
+            if k == 'g':
+                continue  # handled above, together with 'gmm'
             if k in cfg_keys:
                 # print(k, ind)
                 if isinstance(ind, tuple):

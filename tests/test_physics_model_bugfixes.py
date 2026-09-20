@@ -212,6 +212,70 @@ def test_apply_t1_scaling_uses_t1_star_when_flip_angle_given():
 
 
 # ---------------------------------------------------------------------------
+# _split_metab_mm_columns: shared metabolite/MM-lipid column split, used by
+# both set_parameter_constraints() (config-driven 'g'/'gmm' ranges) and the
+# 'g'/b0 double-counting guard below.
+# ---------------------------------------------------------------------------
+
+def test_split_metab_mm_columns_basic_split():
+    metab_cols, mm_cols = PhysicsModel._split_metab_mm_columns((0, 1, 2, 3, 4), n_mm_lines=2)
+    assert metab_cols == [0, 1, 2]
+    assert mm_cols == [3, 4]
+
+
+def test_split_metab_mm_columns_no_mm_lines():
+    metab_cols, mm_cols = PhysicsModel._split_metab_mm_columns((0, 1, 2), n_mm_lines=0)
+    assert metab_cols == [0, 1, 2]
+    assert mm_cols == []
+
+
+def test_split_metab_mm_columns_all_mm():
+    metab_cols, mm_cols = PhysicsModel._split_metab_mm_columns((0, 1), n_mm_lines=2)
+    assert metab_cols == []
+    assert mm_cols == [0, 1]
+
+
+def _fake_physics_model_for_constraints(n_metab=3, n_mm=2):
+    '''
+    A bare, __init__-free PhysicsModel instance carrying only the state
+    set_parameter_constraints() actually touches (self._index, self.MM,
+    self.min_ranges/max_ranges, self.new_params) -- avoids needing a real
+    basis-set file (see test_parameters.py's module docstring for why
+    committed tests avoid depending on one).
+    '''
+    pm = PhysicsModel.__new__(PhysicsModel)
+    n_total = n_metab + n_mm
+    pm._index = {'g': tuple(range(n_total))}
+    pm.MM = n_mm
+    pm.min_ranges = torch.zeros(1, n_total)
+    pm.max_ranges = torch.zeros(1, n_total)
+    pm.new_params = {}
+    return pm
+
+
+def test_set_parameter_constraints_g_and_gmm_write_separate_slices():
+    """Repo owner's request: 'g'/'gmm' (config keys, no leading
+    underscore -- see docs/v2/progress_log.md) must write into different
+    SLICES of the SAME combined tensor, not a separate index/call."""
+    pm = _fake_physics_model_for_constraints(n_metab=3, n_mm=2)
+    pm.set_parameter_constraints({'g': [5, 20], 'gmm': [1, 3]})
+
+    assert torch.equal(pm.min_ranges[0, :3], torch.full((3,), 5.0))
+    assert torch.equal(pm.max_ranges[0, :3], torch.full((3,), 20.0))
+    assert torch.equal(pm.min_ranges[0, 3:], torch.full((2,), 1.0))
+    assert torch.equal(pm.max_ranges[0, 3:], torch.full((2,), 3.0))
+
+
+def test_set_parameter_constraints_g_only_leaves_mm_untouched():
+    pm = _fake_physics_model_for_constraints(n_metab=3, n_mm=2)
+    pm.max_ranges[0, 3:] = 99.0  # pre-existing MM value
+    pm.set_parameter_constraints({'g': [0, 0]})
+
+    assert torch.equal(pm.max_ranges[0, :3], torch.zeros(3))
+    assert torch.equal(pm.max_ranges[0, 3:], torch.full((2,), 99.0))
+
+
+# ---------------------------------------------------------------------------
 # 'g' vs. b0=True double-counting guard (handover section 11 audit).
 # Confirmed live in 4 shipped configs (docs/v2/progress_log.md); MM/lipid
 # lines are exempt per the repo owner directly.
