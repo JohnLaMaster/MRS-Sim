@@ -35,6 +35,7 @@ one component never perturbs another's random stream.
 from __future__ import annotations
 
 import json
+import warnings
 from abc import ABC, abstractmethod
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -264,6 +265,40 @@ class CopulaInVivoSampler(ParameterSampler):
             self._marginals.append(getattr(stats, dist_name)(**kwargs))
 
         self._col_targets = [self._resolve_column_target(n) for n in self.names]
+
+        # v2.0 (handover section 2 follow-up, "make sure the overlapping
+        # parameter-range mechanisms don't conflict with each other"):
+        # this sampler writes absolute, already-real-world values directly
+        # into its covered columns (see sample() below), completely
+        # bypassing min_ranges/max_ranges/quantify_params() -- so any
+        # config "parameters" block override (PhysicsModel.
+        # set_parameter_constraints()) for the SAME column is silently
+        # superseded, not blended or errored. That precedence is
+        # intentional (the copula's fitted in-vivo distribution is more
+        # informative than a min/max range), but it must not be a SILENT
+        # surprise -- warn here, naming exactly which columns/parameters
+        # collide, rather than leaving a user to discover it by noticing
+        # their config override had no effect.
+        configured = getattr(self.pm, 'explicitly_configured_columns', set())
+        if configured:
+            covered_cols = set()
+            for target in self._col_targets:
+                covered_cols.update(target if isinstance(target, list) else [target])
+            overlap = covered_cols & configured
+            if overlap:
+                overlap_names = sorted({
+                    name for name, target in zip(self.names, self._col_targets)
+                    if (set(target) if isinstance(target, list) else {target}) & overlap
+                })
+                warnings.warn(
+                    f"CopulaInVivoSampler covers {len(overlap)} column(s) that also "
+                    f"have a config 'parameters' block override "
+                    f"({overlap_names}) -- the copula's fitted in-vivo values will "
+                    f"be used for these, the config override will have no effect. "
+                    f"Pass exclude_params=... if the config override should win "
+                    f"instead. See docs/v2/progress_log.md (handover section 2).",
+                    stacklevel=2,
+                )
 
     @staticmethod
     def _resolve_selection(

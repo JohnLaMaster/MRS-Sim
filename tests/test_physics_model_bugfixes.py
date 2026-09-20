@@ -239,7 +239,8 @@ def _fake_physics_model_for_constraints(n_metab=3, n_mm=2):
     '''
     A bare, __init__-free PhysicsModel instance carrying only the state
     set_parameter_constraints() actually touches (self._index, self.MM,
-    self.min_ranges/max_ranges, self.new_params) -- avoids needing a real
+    self.min_ranges/max_ranges, self.new_params,
+    self.explicitly_configured_columns) -- avoids needing a real
     basis-set file (see test_parameters.py's module docstring for why
     committed tests avoid depending on one).
     '''
@@ -249,6 +250,7 @@ def _fake_physics_model_for_constraints(n_metab=3, n_mm=2):
     pm.MM = n_mm
     pm.min_ranges = torch.zeros(1, n_total)
     pm.max_ranges = torch.zeros(1, n_total)
+    pm.explicitly_configured_columns = set()
     pm.new_params = {}
     return pm
 

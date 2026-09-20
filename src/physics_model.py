@@ -454,6 +454,17 @@ class PhysicsModel(nn.Module):
         # num_mets = len(self._metab)
         self.min_ranges = torch.zeros([1,len(header)], dtype=torch.float32)
         self.max_ranges = torch.zeros_like(self.min_ranges)
+        # v2.0 (handover section 2 follow-up, "make the overlapping
+        # parameter-range mechanisms not conflict with each other"):
+        # tracks which columns set_parameter_constraints() has explicitly
+        # overridden (config "parameters" block), as opposed to left at
+        # their basis-set/database default. Consulted by
+        # CopulaInVivoSampler (src/sampling.py) to warn -- not silently --
+        # when a copula-covered column also has a config override, since
+        # the copula writes absolute values directly (bypassing
+        # min_ranges/max_ranges/quantify_params entirely) and would
+        # silently win over that override otherwise.
+        self.explicitly_configured_columns = set()
         self.new_params_assert_msg = None
         self.new_params = OrderedDict()
                                     
@@ -1670,6 +1681,23 @@ class PhysicsModel(nn.Module):
 
 
     def set_parameter_constraints(self, cfg: dict):
+        '''
+        Override specific columns' sampling range (self.min_ranges/
+        max_ranges), on top of whatever define_parameter_ranges() already
+        set from the basis-set/metabolite-database defaults -- this is
+        the middle of three overlapping range-definition mechanisms (v2.0
+        handover section 2): (1) basis-set/database defaults
+        (define_parameter_ranges(), lowest precedence), (2) this config
+        "parameters" block (overrides 1), (3) CopulaInVivoSampler
+        (src/sampling.py) writing absolute values directly into specific
+        columns for its covered parameters, bypassing min_ranges/
+        max_ranges/quantify_params() entirely -- so for any column the
+        copula covers, whatever this method set here is silently
+        superseded, not blended or errored. Every column this method
+        actually touches is recorded in self.explicitly_configured_columns
+        so CopulaInVivoSampler can warn (not silently proceed) when its
+        own covered columns overlap with one of these overrides.
+        '''
         cfg_keys = [k.lower() for k in cfg.keys()]
 
         # v2.0 (handover section 11 follow-up): 'g' (metabolite Gaussian
@@ -1699,9 +1727,11 @@ class PhysicsModel(nn.Module):
             if 'g' in cfg_keys and metab_cols:
                 self.min_ranges[:, metab_cols] = cfg['g'][0]
                 self.max_ranges[:, metab_cols] = cfg['g'][1]
+                self.explicitly_configured_columns.update(metab_cols)
             if 'gmm' in cfg_keys and mm_cols:
                 self.min_ranges[:, mm_cols] = cfg['gmm'][0]
                 self.max_ranges[:, mm_cols] = cfg['gmm'][1]
+                self.explicitly_configured_columns.update(mm_cols)
             if 'g' in self.new_params.keys():
                 self.new_params.pop('g')
 
@@ -1716,11 +1746,13 @@ class PhysicsModel(nn.Module):
                     for i, ii in zip(ind, range(len(ind))):
                         self.min_ranges[:,i] = cfg[k][0] if not torch.is_tensor(cfg[k][0]) else cfg[k][0][ii]
                         self.max_ranges[:,i] = cfg[k][1] if not torch.is_tensor(cfg[k][1]) else cfg[k][1][ii]
+                    self.explicitly_configured_columns.update(ind)
                 else:
                     self.min_ranges[:,ind] = cfg[k][0]
                     self.max_ranges[:,ind] = cfg[k][1]
-                
-                if k in self.new_params.keys(): 
+                    self.explicitly_configured_columns.add(ind)
+
+                if k in self.new_params.keys():
                     self.new_params.pop(k)
         
         # assert len(self.new_params.keys())==0, self.new_params_assert_msg + '\n {}'.format([k for k in self.new_params.keys()])

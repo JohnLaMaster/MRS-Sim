@@ -1857,6 +1857,61 @@ avoid depending on -- see `test_parameters.py`'s module docstring),
 following the same pattern already used for `compute_crlb()` itself.
 Full suite: 142/142 passing (no regression).
 
+## Milestone 24 — overlapping parameter-range mechanisms: make the conflict visible, not silent (commit TBD)
+
+**Handover section addressed**: 2 (composable sampler), follow-up to the
+repo owner's much-earlier open question about the three overlapping
+range-definition mechanisms ("probably excessive and very certainly
+redundant") -- asked directly to "make sure that the overlapping
+parameter range mechanisms don't conflict with each other."
+
+**The three mechanisms, and their actual precedence (confirmed by
+reading, not assumed)**:
+1. Basis-set/metabolite-database defaults (`define_parameter_ranges()`,
+   lowest precedence).
+2. Config `"parameters"` block (`set_parameter_constraints()`) --
+   overrides 1, writes into `self.min_ranges`/`max_ranges`.
+3. `CopulaInVivoSampler` (`src/sampling.py`) -- for its covered columns,
+   writes absolute, already-real-world values **directly** into the
+   sampled tensor (`tensor[:, target] = x`), completely bypassing
+   `min_ranges`/`max_ranges`/`quantify_params()`. For columns it doesn't
+   cover, it falls back to `UniformRangeSampler`, which *does* respect
+   1/2 normally.
+
+**The actual conflict**: mechanisms 2 and 3 can both target the same
+column (e.g. a config sets `"g": [5, 20]` while a copula's distributions
+JSON also has a `gaussLB`-mapped entry) -- mechanism 3 always wins
+*silently*, with no error or warning, since it never consults
+`min_ranges`/`max_ranges` at all for that column. A user relying on their
+config override would see it silently have no effect. This precedence
+(copula's fitted in-vivo distribution outranks a min/max range) is a
+reasonable, intentional design -- the problem was that it was invisible,
+not that it was wrong.
+
+**Fix, scoped to making this visible rather than restructuring the three
+mechanisms** (a full redesign wasn't asked for, and the repo owner's
+"redundant" comment was about the mechanisms' existence, not necessarily
+a request to collapse them): `PhysicsModel.define_parameter_ranges()`
+now initializes `self.explicitly_configured_columns = set()`;
+`set_parameter_constraints()` records every column it actually writes
+into. `CopulaInVivoSampler.__init__()` checks its own covered columns
+against `self.pm.explicitly_configured_columns` and raises a `UserWarning`
+naming exactly which parameters collide and that the copula will win, if
+any overlap -- rather than a user discovering it by noticing their
+config override had no effect. Uses `getattr(self.pm,
+'explicitly_configured_columns', set())` so a `PhysicsModel`-like object
+without this tracking (e.g. the fake used in `tests/test_sampling.py`)
+degrades to "no warning" rather than crashing.
+
+**Verified end to end**: `mainFcns.prepare()` against `cows.json`'s real
+config correctly populates `pm.explicitly_configured_columns` (confirmed
+non-empty, includes the expected column indices for every `"parameters"`
+block key that matches a real `self.index` entry).
+
+**Tests**: 2 new in `tests/test_sampling.py` (warns on overlap; does not
+warn -- confirmed via `warnings.simplefilter("error")` -- when there is
+none). Full suite: 144/144 passing.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across

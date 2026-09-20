@@ -6,6 +6,7 @@ these tests stay fast and independent of any basis-set file -- see
 tests/test_parameters.py's module docstring for the same rationale.
 """
 import json
+import warnings
 
 import numpy as np
 import pytest
@@ -174,6 +175,37 @@ def test_copula_sampler_overwrites_only_selected_columns(dist_json_path, corr_ma
     torch.testing.assert_close(params['cr']['gaussian'], params['naa']['gaussian'])
     # snr sampled from N(15, 3), not the fallback's [5, 30] uniform quantify
     assert params['snr'].std() < 10.0
+
+
+def test_copula_sampler_warns_when_config_override_overlaps_covered_column(dist_json_path, corr_matrix_path):
+    """
+    v2.0 handover section 2 follow-up ("make sure the overlapping
+    parameter-range mechanisms don't conflict with each other"):
+    PhysicsModel.set_parameter_constraints() records which columns it
+    touched in explicitly_configured_columns; CopulaInVivoSampler must
+    warn (not silently proceed) when one of its own covered columns
+    ('g' -> columns 4, 5 via GLOBAL_PARAM_MAP) overlaps.
+    """
+    pm = FakePhysicsModel()
+    pm.explicitly_configured_columns = {4}  # overlaps 'g' column 0
+
+    with pytest.warns(UserWarning, match="config 'parameters' block override"):
+        CopulaInVivoSampler(
+            pm, dist_json_path, corr_matrix_path,
+            global_param_map=GLOBAL_PARAM_MAP, seed=0,
+        )
+
+
+def test_copula_sampler_no_warning_without_overlapping_override(dist_json_path, corr_matrix_path):
+    pm = FakePhysicsModel()
+    pm.explicitly_configured_columns = {10}  # 'phi0' column, not covered by this copula (cr/naa/g/snr)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        CopulaInVivoSampler(
+            pm, dist_json_path, corr_matrix_path,
+            global_param_map=GLOBAL_PARAM_MAP, seed=0,
+        )
 
 
 def test_copula_sampler_fallback_still_quantifies_uncovered_columns(dist_json_path, corr_matrix_path):
