@@ -1808,6 +1808,8 @@ class PhysicsModel(nn.Module):
                 return_fim: bool=False,
                 crlb_include_params: list=None,
                 crlb_exclude_params: list=None,
+                fit_baseline_spline: bool=False,
+                collect_provenance: bool=False,
                ) -> torch.Tensor:
         
         if params.ndim==1: params = params.unsqueeze(0) # Allows batchSize = 1
@@ -2248,6 +2250,8 @@ class PhysicsModel(nn.Module):
                 compute_crlb_flag=compute_crlb, return_fim=return_fim,
                 crlb_include_params=crlb_include_params,
                 crlb_exclude_params=crlb_exclude_params,
+                fit_baseline_spline_flag=fit_baseline_spline,
+                collect_provenance_flag=collect_provenance,
             )
         return self.compile_outputs(specSummed, spectral_fit, offsets, params,
                                     denom, quantities, SNR=SNR)
@@ -2304,6 +2308,8 @@ class PhysicsModel(nn.Module):
                         return_fim: bool=False,
                         crlb_include_params: list=None,
                         crlb_exclude_params: list=None,
+                        fit_baseline_spline_flag: bool=False,
+                        collect_provenance_flag: bool=False,
                        ) -> 'SimulationResult':
         '''
         Build the v2.0 structured SimulationResult (handover section 3).
@@ -2345,9 +2351,23 @@ class PhysicsModel(nn.Module):
         # value actually used in add_offsets() upstream, in the forward
         # simulation, is untouched by this). ppm_cropped is the acquired-
         # grid x-axis baseline's last dimension is already on.
+        #
+        # BUGFIX (v2.0, handover section 3 audit): this used to run
+        # unconditionally whenever a baseline was generated, with no way
+        # to get the raw baseline back without also paying for the spline
+        # fit -- per the repo owner directly: "the splines don't need to
+        # fit every baseline unless explicitly flagged," matching how
+        # compute_crlb is already opt-in (compute_crlb=False by default)
+        # rather than tied to whatever else happened to be enabled that
+        # call. Now gated on fit_baseline_spline_flag (forward()'s
+        # fit_baseline_spline=False default) in addition to a baseline
+        # actually existing. compute_crlb (below) already tolerates
+        # spline_coefficients=None (falls back to a zero-baseline nuisance
+        # term), so skipping this doesn't break CRLB when both are used
+        # together.
         baseline_fit = None
         spline_coefficients = None
-        if baseline is not None:
+        if baseline is not None and fit_baseline_spline_flag:
             spline = fit_baseline_spline(baseline, self.ppm_cropped.squeeze(0))
             baseline_fit = spline.fitted
             spline_coefficients = spline.coefficients
@@ -2425,6 +2445,35 @@ class PhysicsModel(nn.Module):
         else:
             crlb_labels = None
 
+        # Handover section 9 follow-up: collect_provenance() (src/
+        # provenance.py) has always been a correct, comprehensive
+        # standalone utility, but nothing ever called it automatically --
+        # SimulationResult.provenance stayed a two-key placeholder dict
+        # regardless. Gated on collect_provenance_flag (forward()'s
+        # collect_provenance=False default), matching the same "flags
+        # control compute" pattern as compute_crlb/fit_baseline_spline
+        # above: collect_provenance() shells out to git and hashes the
+        # basis set on every call, real (if small) per-call cost that
+        # shouldn't happen by default in e.g. a tight training loop.
+        if collect_provenance_flag:
+            from .provenance import collect_provenance
+            provenance = collect_provenance(
+                pm=self,
+                enabled_components={
+                    'noise': noise,
+                    'offsets': bool(offsets),
+                    'compute_crlb': compute_crlb_flag,
+                    'fit_baseline_spline': fit_baseline_spline_flag,
+                },
+                dtype=params.dtype,
+                device=params.device,
+            ).to_dict()
+        else:
+            provenance = {
+                'noise_enabled': noise,
+                'offsets_enabled': bool(offsets),
+            }
+
         return SimulationResult(
             noisy=noisy,
             noise_free_total=noise_free_total,
@@ -2441,8 +2490,5 @@ class PhysicsModel(nn.Module):
             fim=fim,
             crlb_labels=crlb_labels,
             quantities=quantities,
-            provenance={
-                'noise_enabled': noise,
-                'offsets_enabled': bool(offsets),
-            },
+            provenance=provenance,
         )

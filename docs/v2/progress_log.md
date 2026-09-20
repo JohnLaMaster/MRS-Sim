@@ -1802,6 +1802,61 @@ directly (it doesn't reference `self`, so no basis set is needed) and
 asserting the realized noise std matches the target within 5%. Full
 suite: 142/142 passing.
 
+## Milestone 23 — per-component compute skipping (baseline spline); provenance actually wired into SimulationResult (commit TBD)
+
+**Handover sections addressed**: 3 (per-component skip-to-save-memory/
+compute, deferred since Milestone 5) and 9 (provenance, follow-up to the
+repo owner's "what do you mean by 'not wired in'?" question earlier this
+session).
+
+**Per-component compute skipping, clarified by the repo owner directly**:
+"I use the flags in the forward pass to only do what is necessary for
+that pass. That means the CRLBs don't need to be calculated for every
+pass and the splines don't need to fit every baseline unless explicitly
+flagged." Checked both:
+- `compute_crlb` was already correctly gated (`compute_crlb: bool=False`
+  default, only computed in `_compile_result()` when explicitly `True`) --
+  no change needed, confirmed by reading the existing code.
+- Baseline spline fitting was **not** gated -- `fit_baseline_spline()`
+  ran unconditionally whenever a baseline existed (`if baseline is not
+  None:`), with no way to get the raw generated baseline back without
+  also paying for the spline fit. Fixed: `forward()` gained
+  `fit_baseline_spline: bool=False`, threaded through to
+  `_compile_result()`; the fit now only runs when a baseline exists
+  *and* this flag is `True`. `compute_crlb` already tolerated
+  `spline_coefficients=None` (falls back to a zero-baseline nuisance
+  term), so this doesn't break CRLB when both are used together --
+  verified directly. Verified end to end against `cows.json`'s real
+  basis set: default call generates a baseline but leaves
+  `baseline_fit`/`spline_coefficients` as `None`; `fit_baseline_spline=
+  True` populates both; `compute_crlb=True` with the default (spline
+  fit skipped) still returns a valid `crlb`.
+
+**Provenance wiring**: `collect_provenance()` (Milestone 9) was always a
+correct, comprehensive standalone utility, but nothing called it
+automatically -- `SimulationResult.provenance` stayed a two-key
+placeholder dict (`{'noise_enabled', 'offsets_enabled'}`) regardless.
+Added `forward(..., collect_provenance: bool=False)`: when `True`,
+`_compile_result()` calls `collect_provenance()` (basis-set name/content
+hash, git commit, acquisition metadata, SNR definitions, the enabled-
+components dict, dtype/device) and attaches its `.to_dict()` as
+`SimulationResult.provenance`; the old placeholder dict is kept as the
+default (unchanged behavior when not requested). Gated behind a flag
+rather than made automatic, matching the same "flags control compute"
+principle above -- `collect_provenance()` shells out to `git` and hashes
+the loaded basis set on every call, a real (if small) per-call cost that
+shouldn't happen by default in a tight sampling/training loop. Verified
+end to end against `cows.json`'s real basis set: default provenance
+unchanged; `collect_provenance=True` returns all 15
+`Provenance` fields populated (confirmed `basis_set_name`,
+`basis_set_hash`, `git_commit`, and `enabled_components` all correct).
+
+**Tests**: verified manually against a real basis set (both features
+need a real `PhysicsModel`/`_compile_result()`, which committed tests
+avoid depending on -- see `test_parameters.py`'s module docstring),
+following the same pattern already used for `compute_crlb()` itself.
+Full suite: 142/142 passing (no regression).
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across
