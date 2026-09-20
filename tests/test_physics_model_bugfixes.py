@@ -266,6 +266,45 @@ def test_set_parameter_constraints_g_and_gmm_write_separate_slices():
     assert torch.equal(pm.max_ranges[0, 3:], torch.full((2,), 3.0))
 
 
+# ---------------------------------------------------------------------------
+# generate_noise() FFT-domain normalization bug (handover section 7 audit).
+# CRITICAL: this affected the actual noise magnitude added to every
+# noise=True simulation. generate_noise() doesn't reference `self`, so it's
+# called directly here without constructing a PhysicsModel (no basis set
+# needed -- see test_parameters.py's module docstring).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("n_pts", [512, 2048, 8192])
+def test_generate_noise_realized_std_matches_target_across_fft_lengths(n_pts):
+    """
+    Regression test for a real, precisely-diagnosed bug: generate_noise()
+    normalizes noise to std_dev IN THE FREQUENCY DOMAIN, then inverse-
+    Fourier-transforms it -- torch.fft's convention (unnormalized forward,
+    1/N-scaled inverse) means that round trip used to shrink the
+    time-domain std by exactly sqrt(N), independent of N (confirmed
+    directly for N=1024/2048/8192 before this fix -- e.g. N=2048 produced
+    a ~45x-too-small realized noise std, sqrt(2048)=45.25). Verified against
+    a real basis set (cows.json) post-fix: realized SNR now matches a
+    target SNR of 15 to within ~1%, previously off by ~45x.
+    """
+    torch.manual_seed(0)
+    bS = 1000
+    target_snr = 15.0
+    max_val = torch.full((bS,), 100.0)
+    param = torch.full((bS,), target_snr)
+    fid = torch.zeros(bS, 2, n_pts)
+    zeros = torch.zeros(bS, 1)
+    transients = torch.ones(bS, 1)  # single-coil (transients.shape[1]==1)
+
+    noise_vec, _ = PhysicsModel.generate_noise(
+        None, fid=fid, param=param, max_val=max_val, zeros=zeros,
+        transients=transients, uncorrelated=True)
+
+    expected_std = 100.0 / target_snr
+    actual_std = noise_vec.std(dim=-1).mean().item()
+    assert actual_std == pytest.approx(expected_std, rel=0.05)
+
+
 def test_set_parameter_constraints_g_only_leaves_mm_untouched():
     pm = _fake_physics_model_for_constraints(n_metab=3, n_mm=2)
     pm.max_ranges[0, 3:] = 99.0  # pre-existing MM value

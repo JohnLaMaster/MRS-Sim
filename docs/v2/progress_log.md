@@ -1550,17 +1550,18 @@ from before this fix) to note those numbers no longer reflect current
 behavior. Updated `SimulationResult`'s field comments and `provenance.
 py`'s `snr_definitions` to say "unitless ratio" throughout, not decibels.
 
-**Verification caveat, reported honestly rather than glossed over**: an
-end-to-end check against `cows.json`'s real basis set (target SNR = 15,
-batch of 200) found `realized_snr['spectral']` at the `snr_metab` line
-averaging ~680 -- roughly 45x the target, not a close match. Fixing the
-decibel-formula bug did not reconcile target vs. realized SNR into close
-agreement; this appears to be the same "I still don't know why the
-overall SNRs vary so much" gap the original author already documented in
-`generate_noise()`'s own docstring (pre-existing, not introduced by this
-fix), not something this specific fix was expected to resolve. Not
-root-caused further in this pass -- flagged here rather than left
-implicit, in case it's worth a dedicated follow-up.
+**Verification caveat -- root-caused and fixed in Milestone 22 below**:
+an end-to-end check against `cows.json`'s real basis set (target SNR =
+15, batch of 200) found `realized_snr['spectral']` at the `snr_metab`
+line averaging ~680 -- roughly 45x the target, not a close match. My
+first-pass guess (this section, as originally written) was that this was
+the same pre-existing "I still don't know why the overall SNRs vary so
+much" gap the original author documented in `generate_noise()`'s own
+docstring, and left it unexplained. The repo owner pushed back directly
+("that code was in fact working before... you need to figure that out"),
+which was the right call: it was a distinct, precisely-diagnosable bug
+(a factor of exactly `sqrt(N)` from FFT-domain noise normalization -- see
+Milestone 22), not the author's older variance concern. Fixed there.
 
 **'g'/`b0` double-counting guard (Finding 2 from Milestone 19)**: repo
 owner's decision -- raise a clear error like the `b0`/`V1_0` guard, with
@@ -1705,6 +1706,101 @@ would be fabricating the repo owner's intent). Directly confirmed
 left unfinished, as above); the pre-existing `snr_metab`-required-with-
 no-default issue in `mainFcns.prepare()` (blocks every config except
 `cows.json` from even loading, unrelated to this session's work).
+
+## Milestone 22 — CRITICAL: generate_noise() was off by sqrt(N) for every noisy simulation; default SNR=15 (commit TBD)
+
+**Handover section addressed**: 7 (SNR), follow-up. Repo owner pushed
+back on Milestone 20's "unexplained ~45x gap, not root-caused" writeup --
+correctly: this was a real, precisely-diagnosable bug, not the older
+"varies a lot" mystery.
+
+**The repo owner's own description of the intended formula, confirmed
+correct and exactly what the code should do**: "SNR = max(Real(spectrum))
+/ (1 std of noise). Therefore noise_std = max(real(spectrum)) /
+target_SNR. The noise distribution is therefore Normal(mean=0, sigma=
+noise_std)." This is exactly `std_dev = max_val / lin_snr` (now `lin_snr
+= param` post-Milestone-20) -- confirmed correct, not the bug.
+
+**Root cause, isolated from all basis-set/physics content and confirmed
+with an exact, reproducible calculation**: `generate_noise()` draws white
+noise, Fourier-transforms it, normalizes THAT (the frequency-domain
+representation) to have mean 0 and std `std_dev`, then inverse-Fourier-
+transforms it back to time domain -- and returns *that* as the noise
+actually added to the spectrum. `Fourier_Transform`/`inv_Fourier_Transform`
+(`src/aux/aux.py`) use `torch.fft`'s default ("backward") normalization:
+the forward `fft` is unscaled, the inverse `ifft` is scaled by `1/N`. That
+convention means normalizing a signal to std `X` in the frequency domain
+and then inverse-transforming it does NOT give a time-domain signal with
+std `X` -- it gives one with std `X / sqrt(N)` (N = number of spectral
+points). Verified directly, isolated from any PhysicsModel/basis-set
+content, for N=1024/2048/8192: requesting `std_dev=8.5` produced actual
+time-domain stds of 0.265/0.184/0.094 respectively -- ratios of
+32.05/46.2/90.4, matching `sqrt(1024)=32.0`, `sqrt(2048)=45.25`,
+`sqrt(8192)=90.5` to within statistical noise from a single random draw.
+This is why the `cows.json` end-to-end check (N=2048 for that basis)
+showed ~45x: `sqrt(2048)=45.25`, matching essentially exactly.
+
+**Consequence**: every simulated dataset with `noise=True` (i.e. every
+real dataset -- `noise` defaults to being requested in every shipped
+config) has had actual noise added at a magnitude far *smaller* than the
+sampled target SNR implied -- realized SNR far *higher* than requested,
+by a factor of `sqrt(N)` where N is that basis set's spectral length.
+This is a real, live, previously-uncaught bug, not something introduced
+this session (the FFT-domain-normalization approach predates this
+refactor).
+
+**Fix**: pre-scale the frequency-domain target by `sqrt(N)` before
+normalizing, so the inverse FFT's `1/N` scaling brings the time-domain
+result back to exactly `std_dev`
+(`std_dev.unsqueeze(-1) * (fid.shape[-1] ** 0.5)`). Verified precisely:
+the isolated calculation above, redone with this fix, gives actual stds
+of 8.484/8.346/8.527 against a target of 8.5 for N=1024/2048/8192 --
+all within ~2% (single-draw statistical noise, not a residual bug).
+**Verified end to end against `cows.json`'s real basis set**: target SNR
+15, batch of 200 -> realized `sSNR` at the `snr_metab` line now averages
+15.02 (std 0.16, range 14.66-15.52) -- matching the target almost
+exactly, compared to ~680 (45x off) before this fix. Also verified the
+multi-transient scaling relationship (Milestone 18) still holds correctly
+post-fix: with `num_coils=3` and every `coil_snr` weight fixed at 1.0,
+per-transient realized SNR averaged 8.666, matching the predicted
+`15/sqrt(3)=8.660` closely.
+
+**Default SNR range changed to [5, 30]** (repo owner's explicit request:
+"if you are defining min and max, then it should be 5 and 30"; a fixed 15
+was only the fallback if the mechanism couldn't hold a range, which it
+can): `src/basis_sets/artifacts.mat`'s `'snr'` entry changed from
+`{'min': 0, 'max': 100}` to `{'min': 5, 'max': 30}` -- this is the
+fallback range used whenever nothing else overrides the `'snr'` column
+(confirmed: the top-level config `"snr": [min, max]` key, e.g.
+`cows.json`'s `[10, 20]`, is *not* read by `mainFcns.prepare()`/
+`PhysicsModel` at all -- it's only consumed by the separate driver
+template scripts, e.g. `mrs-sim_template.py:121`'s
+`params[:,ind['snr']].uniform_(config.snr[0], config.snr[1])`, matching
+the repo owner's "I always use py files to define how to sample the
+parameters" -- so this default only matters for callers that don't
+already override SNR sampling themselves). `'snr'` remains a genuine,
+per-sample sampled column of `params` (`self.index['snr']`, read directly
+by both `generate_noise()` and `SimulationResult.target_snr` -- confirmed
+unchanged) -- only the *default range* changed, nothing hardcodes SNR to
+a constant. Edited the binary `.mat` file directly via `scipy.io.loadmat`/
+`savemat`, verified the round trip preserves every other artifact default
+byte-for-byte (`d`, `g`, `phi0`, `coil_snr`, etc. all unchanged) and loads
+correctly through the real `PhysicsModel.__init__()`/`convertdict()` path
+before overwriting the shared file.
+
+**Additional multicoil verification, requested directly before
+committing**: repeated the multicoil check with `coil_snr` weights *and*
+`coil_sens` (some coils zeroed) both randomly sampled per sample per
+transient, rather than fixed at 1.0 -- 300 samples x 4 transients = 1200
+data points, `realized / predicted` (predicted =
+`target_snr / sqrt(n_effective_coils) * coil_snr_weight`) had mean 1.0001,
+std 0.011, range [0.965, 1.039].
+
+**Tests**: 3 new (parametrized over N=512/2048/8192) in
+`tests/test_physics_model_bugfixes.py`, calling `generate_noise()`
+directly (it doesn't reference `self`, so no basis set is needed) and
+asserting the realized noise std matches the target within 5%. Full
+suite: 142/142 passing.
 
 ## Not yet started
 

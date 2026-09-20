@@ -1090,7 +1090,28 @@ class PhysicsModel(nn.Module):
         mn = e.mean(dim=-1, keepdims=True)
         std = e.std(dim=-1, keepdims=True)
         std[std==0] += 1e-6
-        e = (e - mn).div(std).mul(std_dev.unsqueeze(-1))
+        # BUGFIX (v2.0, handover section 7 audit): this normalizes `e` to
+        # std_dev IN THE FREQUENCY DOMAIN, then inverse-Fourier-transforms
+        # it to get the time-domain noise actually returned/added to the
+        # spectrum. torch.fft's convention (unnormalized forward `fft`,
+        # 1/N-scaled inverse `ifft` -- see Fourier_Transform/
+        # inv_Fourier_Transform in src/aux/aux.py) means that round trip
+        # does NOT preserve std: a frequency-domain signal normalized to
+        # std_dev comes back from inv_Fourier_Transform with a time-domain
+        # std smaller by a factor of sqrt(N) (N = fid.shape[-1]), not
+        # std_dev itself. Confirmed directly, isolated from any basis-set/
+        # physics content, for N=1024/2048/8192 -- the measured ratio
+        # matched sqrt(N) precisely in each case (e.g. requesting std_dev
+        # =8.5 with N=2048 produced an actual std of ~0.18, a 45x error --
+        # sqrt(2048)=45.25). The realized noise was therefore always far
+        # smaller than the sampled target SNR implied (realized SNR far
+        # higher than target), for every simulated dataset with noise=True
+        # and the default uncorrelated=True path (the only path actually
+        # used -- see forward()'s call site). Fixed by pre-scaling the
+        # frequency-domain target by sqrt(N) so the 1/N inverse-FFT
+        # scaling brings the time-domain result back to std_dev exactly.
+        n_pts = fid.shape[-1]
+        e = (e - mn).div(std).mul(std_dev.unsqueeze(-1) * (n_pts ** 0.5))
 
         return inv_Fourier_Transform(e), d
 
