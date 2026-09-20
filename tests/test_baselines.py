@@ -4,14 +4,13 @@ Unit tests for src.baselines.bounded_random_walk (v2.0 handover section 13:
 fitting itself is covered in tests/test_splines.py). Pure function, no
 basis set needed.
 
-`start`/`end` use shape (batch, 1, 1), matching how PhysicsModel.baselines()
-/residual_water() actually call this (see e.g. sample_resWater()'s
-torch.zeros(N, 1, 1) construction in src/aux/aux.py) -- a plain
-(batch, 1) shape hits a real, separate broadcasting bug in this function
-(batch_linspace's start.expand_as(stop) silently cross-broadcasts the
-batch dimension against itself instead of raising or preserving it, e.g.
-a (4, 1) start/end produces a (4, 4, 16) result instead of (4, 1, 16));
-not fixed here (out of scope), noted in docs/v2/progress_log.md.
+Most tests use shape (batch, 1, 1), matching how PhysicsModel.baselines()/
+residual_water() actually call this (see e.g. sample_resWater()'s
+torch.zeros(N, 1, 1) construction in src/aux/aux.py). A previously-found
+bug (a 2-D (batch, 1) start/end silently cross-broadcasting into
+(batch, batch, length) instead of (batch, 1, length)) is now fixed --
+see test_2d_start_end_no_longer_cross_broadcasts below and
+docs/v2/progress_log.md.
 """
 import torch
 
@@ -68,6 +67,24 @@ def test_zero_std_gives_a_straight_trend_line():
     out = bounded_random_walk(start, end, std=0.0, length=11)
     expected = torch.linspace(0.0, 1.0, 11).view(1, 1, 11)
     torch.testing.assert_close(out, expected, atol=1e-5, rtol=0)
+
+
+def test_2d_start_end_no_longer_cross_broadcasts():
+    """
+    Regression test: a 2-D (batch, 1) start/end used to silently produce
+    a cross-broadcast (batch, batch, length) result instead of
+    (batch, 1, length) -- fixed by normalizing start/end to at least 3-D
+    before any arithmetic. Also checks the actual per-sample start/end
+    values land correctly (not just the shape), which the cross-broadcast
+    bug would have gotten wrong even where the shape coincidentally
+    matched (e.g. batch size 1).
+    """
+    start = torch.tensor([[0.2], [-0.6], [0.1]])
+    end = torch.tensor([[-0.3], [0.4], [0.5]])
+    out = bounded_random_walk(start, end, std=0.05, length=32)
+    assert out.shape == (3, 1, 32)
+    torch.testing.assert_close(out[:, 0, 0:1], start, atol=1e-4, rtol=0)
+    torch.testing.assert_close(out[:, 0, -1:], end, atol=1e-4, rtol=0)
 
 
 def test_bounds_assertion_rejects_out_of_range_start_end():

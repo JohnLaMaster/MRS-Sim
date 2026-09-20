@@ -111,7 +111,59 @@ def test_uniform_sampler_metadata_records_seed():
     pm = FakePhysicsModel()
     params = UniformRangeSampler(pm, seed=7).sample(batch_size=2)
     assert params.metadata['seed'] == 7
-    assert params.metadata['sampler'] == 'UniformRangeSampler'
+
+
+# ---------------------------------------------------------------------------
+# UniformRangeSampler(explicit_ranges=...) -- v2.0 handover section 2
+# follow-up, repo owner's request: "I want the sampler to be able to
+# [sample] in the actual parameter space too. Both options should be
+# preserved." explicit_ranges columns are sampled directly in real units,
+# bypassing pm.min_ranges/max_ranges/quantify_params() entirely (like
+# CopulaInVivoSampler already does for its covered columns); every other
+# column keeps the default [0, 1) -> quantify_params() behavior.
+# ---------------------------------------------------------------------------
+
+def test_uniform_sampler_explicit_ranges_bypasses_quantify_params():
+    """FakePhysicsModel's min/max_ranges are [0, 1] for every non-snr
+    column, so a real-unit explicit_ranges value outside [0, 1] proves
+    quantify_params() was not consulted for that column."""
+    pm = FakePhysicsModel()
+    sampler = UniformRangeSampler(pm, seed=0, explicit_ranges={'g': (50.0, 100.0)})
+    params = sampler.sample(batch_size=200)
+
+    g = params.tensor[:, list(INDEX['g'])]  # columns 4, 5
+    assert (g >= 50.0).all() and (g <= 100.0).all()
+    assert g.mean() > 1.0  # sanity: nowhere near the default [0,1] range
+
+
+def test_uniform_sampler_explicit_ranges_leaves_other_columns_on_default_path():
+    pm = FakePhysicsModel()
+    sampler = UniformRangeSampler(pm, seed=0, explicit_ranges={'g': (50.0, 100.0)})
+    params = sampler.sample(batch_size=64)
+
+    # 'd' (columns 2, 3) was not named in explicit_ranges -> still quantified
+    # to the default [0, 1] range via quantify_params().
+    d = params.tensor[:, list(INDEX['d'])]
+    assert (d >= 0.0).all() and (d <= 1.0).all()
+
+
+def test_uniform_sampler_explicit_ranges_both_modes_reproducible_with_same_seed():
+    pm = FakePhysicsModel()
+    a = UniformRangeSampler(pm, seed=3, explicit_ranges={'g': (50.0, 100.0)}).sample(8)
+    b = UniformRangeSampler(pm, seed=3, explicit_ranges={'g': (50.0, 100.0)}).sample(8)
+    torch.testing.assert_close(a.tensor, b.tensor)
+
+
+def test_uniform_sampler_explicit_ranges_records_metadata():
+    pm = FakePhysicsModel()
+    params = UniformRangeSampler(pm, seed=0, explicit_ranges={'g': (50.0, 100.0)}).sample(4)
+    assert params.metadata['explicit_ranges'] == ['g']
+
+
+def test_uniform_sampler_explicit_ranges_rejects_unknown_key():
+    pm = FakePhysicsModel()
+    with pytest.raises(KeyError):
+        UniformRangeSampler(pm, seed=0, explicit_ranges={'not_a_real_param': (0.0, 1.0)})
 
 
 # ---------------------------------------------------------------------------

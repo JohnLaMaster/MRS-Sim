@@ -98,16 +98,59 @@ class UniformRangeSampler(ParameterSampler):
     set via ``initialize()``/``set_parameter_constraints()``), i.e. the
     ``torch.rand -> PhysicsModel.quantify_params`` pattern used today in
     mrs-sim_template.py / deep_learning_dataset_template.py.
+
+    ``explicit_ranges`` (optional, v2.0 handover section 2 follow-up):
+    a ``{registry_key: (min, max)}`` map, in ACTUAL PARAMETER UNITS (not
+    normalized ``[0, 1)``), for columns that should be sampled directly
+    in that space instead -- ``Uniform(min, max)``, with no
+    ``quantify_params()`` call for those specific columns, the same way
+    ``CopulaInVivoSampler`` already bypasses it for its covered columns
+    (see that class's docstring). Both modes coexist deliberately: any
+    column not named here still goes through the default
+    ``[0, 1) -> quantify_params()`` path, unaffected. Repo owner's
+    request, directly: "I want the sampler to be able to [sample] in the
+    actual parameter space too. Both options should be preserved."
+    ``registry_key`` is matched against ``self.registry.index`` exactly
+    like ``PhysicsModel.set_parameter_constraints()``'s config
+    "parameters" block (e.g. ``'g'``, ``'snr'``, or a metabolite name
+    for its concentration column) -- not the copula's JSON-key suffix
+    parsing (``'naa_ampl'`` etc.), which solves a different problem
+    (aligning an external fitted-distributions file's naming).
     """
+
+    def __init__(self, pm, seed: Optional[int] = None,
+                explicit_ranges: Optional[Mapping[str, Tuple[float, float]]] = None):
+        super().__init__(pm, seed=seed)
+        self.explicit_ranges = dict(explicit_ranges or {})
+        for key in self.explicit_ranges:
+            if key.lower() not in self.registry.index:
+                raise KeyError(
+                    f"explicit_ranges key '{key}' is not a valid parameter "
+                    f"registry key (see PhysicsModel.index / "
+                    f"set_parameter_constraints() for valid names)."
+                )
 
     def sample(self, batch_size: int) -> SimulationParameters:
         n_columns = self.registry.n_columns()
         raw = torch.rand((batch_size, n_columns), generator=self._torch_gen, dtype=torch.float32)
         tensor = self.pm.quantify_params(raw)
+
+        for name, (lo, hi) in self.explicit_ranges.items():
+            cols = self.registry.index[name.lower()]
+            cols = list(cols) if isinstance(cols, tuple) else [cols]
+            direct = torch.rand((batch_size, len(cols)), generator=self._torch_gen,
+                                dtype=torch.float32) * (hi - lo) + lo
+            for i, col in enumerate(cols):
+                tensor[:, col] = direct[:, i]
+
         return SimulationParameters(
             tensor=tensor,
             registry=self.registry,
-            metadata={'sampler': 'UniformRangeSampler', 'seed': self.seed},
+            metadata={
+                'sampler': 'UniformRangeSampler',
+                'seed': self.seed,
+                'explicit_ranges': sorted(self.explicit_ranges.keys()),
+            },
         )
 
 

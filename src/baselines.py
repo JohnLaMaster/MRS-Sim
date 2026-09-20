@@ -14,12 +14,27 @@ def bounded_random_walk(start: torch.Tensor,
                         upper_bound: float=1,
                         length: int=512):
     '''
-    Code modified from: 
+    Code modified from:
     https://stackoverflow.com/questions/46954510/random-walk-series-between-start-end-values-and-within-minimum-maximum-limits
-    The dimensions of start and end should match the dimensions of the 
-    desired number of unique baselines. It is recommended to smooth the 
+    The dimensions of start and end should match the dimensions of the
+    desired number of unique baselines. It is recommended to smooth the
     baselines before adding to the spectra.
     '''
+    # BUGFIX (v2.0, handover section 13): start/end must be at least 3-D
+    # (matching every real call site's (batch, 1, 1) convention -- e.g.
+    # PhysicsModel.baselines()/residual_water()) for this function's
+    # internal arithmetic to stay consistent with batch_linspace()'s own
+    # shape-promotion (src/aux/aux.py, unsqueezes a 2-D `stop` to 3-D). A
+    # 2-D (batch, 1) start/end used to silently produce a cross-broadcast
+    # (batch, batch, length) result instead of (batch, 1, length): `rand`
+    # (computed directly here) stayed at the input's original ndim while
+    # `rand_trend`/`trend_lines` (via batch_linspace) were promoted to one
+    # more dimension, so subtracting them broadcast the batch axis against
+    # the wrong dimension. Normalized here (not inside batch_linspace()
+    # itself, a shared utility other call sites already rely on as-is).
+    while start.ndim < 3: start = start.unsqueeze(-1)
+    while end.ndim < 3: end = end.unsqueeze(-1)
+
     size = list([d for d in start.shape])
     size[-1] = length
 

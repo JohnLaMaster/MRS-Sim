@@ -1935,18 +1935,18 @@ starting/ending at the requested values, seeded reproducibility, distinct
 seeds giving distinct walks, a zero-`std` sanity check (degenerates to a
 straight trend line), and the existing bounds assertion.
 
-**Found while writing these tests, not fixed (out of scope for a testing
-pass) -- a real, separate broadcasting bug**: `bounded_random_walk` (via
-`batch_linspace`, `src/aux/aux.py`) requires `start`/`end` to be at least
-3-D (`(batch, 1, 1)`, matching every real call site in this codebase --
-e.g. `sample_resWater()`'s `torch.zeros(N, 1, 1)`). Passing a 2-D
-`(batch, 1)` `start`/`end` does not raise -- it silently produces a
+**Found while writing these tests, fixed in Milestone 26 below -- a real,
+separate broadcasting bug**: `bounded_random_walk` (via `batch_linspace`,
+`src/aux/aux.py`) required `start`/`end` to be at least 3-D
+(`(batch, 1, 1)`, matching every real call site in this codebase -- e.g.
+`sample_resWater()`'s `torch.zeros(N, 1, 1)`). Passing a 2-D
+`(batch, 1)` `start`/`end` did not raise -- it silently produced a
 cross-broadcast `(batch, batch, length)` result instead of the expected
-`(batch, 1, length)` (confirmed directly: `start=torch.zeros(4,1)` gives
+`(batch, 1, length)` (confirmed directly: `start=torch.zeros(4,1)` gave
 a `(4, 4, 16)` output for `length=16`, not `(4, 1, 16)`). Not live in the
-current pipeline (nothing calls this with a 2-D `start`/`end`), so not
-fixed here, but recorded since it's exactly the kind of dimension-
-handling gap section 13 asks tests to surface.
+current pipeline (nothing calls this with a 2-D `start`/`end`), initially
+left unfixed as out of scope for a testing pass -- repo owner asked for
+it to be fixed directly.
 
 **Tests**: 7 new (`tests/test_baselines.py`). Full suite: 151/151 passing.
 
@@ -1959,6 +1959,131 @@ dimensional operation, and a direct committed regression test for
 SNR at the full `forward()` level (currently verified manually against a
 real basis set per Milestone 22, not as a committed test, since
 `_compile_result()` needs a real `PhysicsModel`).
+
+## Milestone 26 — fix the bounded_random_walk broadcasting bug; sampler support for direct actual-parameter-space sampling (commit TBD)
+
+**Handover sections addressed**: 13 (testing, the bug Milestone 25's
+tests surfaced) and 2 (composable sampler, follow-up to the "overlapping
+range mechanisms" work).
+
+**`bounded_random_walk` 2-D broadcasting bug -- fixed**: root cause was a
+dimensionality mismatch internal to the function itself: `rand` (built
+directly from `start.shape`) kept whatever ndim `start`/`end` came in
+with, while `rand_trend`/`trend_lines` (built via `batch_linspace()`,
+which promotes a 2-D `stop` to 3-D) ended up one dimension higher.
+Subtracting a 2-D `(batch, length)` tensor from a 3-D
+`(batch, 1, length)` one broadcasts the batch axis against the wrong
+dimension (numpy/torch broadcasting pads missing dimensions on the
+*left*), producing `(batch, batch, length)`. Fixed by normalizing
+`start`/`end` to at least 3-D at the very top of `bounded_random_walk`,
+before any other computation -- scoped to this function rather than
+`batch_linspace()` itself, which several other call sites already rely
+on with their own established shapes. Verified directly for `(4,)`,
+`(4,1)`, and `(4,1,1)` inputs, all now correctly giving `(4,1,length)`;
+re-verified end to end against `cows.json`'s real
+`baselines()`/`sample_baselines()` path (unaffected, already used 3-D
+shapes). 1 new regression test
+(`test_2d_start_end_no_longer_cross_broadcasts`, checks both shape and
+that per-sample start/end values land correctly, not just the shape).
+
+**`UniformRangeSampler` gains `explicit_ranges`, direct actual-
+parameter-space sampling -- repo owner's request, verbatim**: "There's a
+function called quantify_parameters or something that is used to
+convert from a latent space to the actual parameter space. The copula
+doesn't need that call. I want the sampler to be able to [sample] in the
+actual parameter space too. Both options should be preserved for now."
+`UniformRangeSampler(pm, explicit_ranges={'g': (5.0, 20.0), ...})`:
+columns named in `explicit_ranges` (matched against
+`self.registry.index`, the same key space `set_parameter_constraints()`
+uses) are sampled directly as `Uniform(min, max)` **in real parameter
+units**, with no `quantify_params()` call for those columns -- bypassing
+`pm.min_ranges`/`max_ranges` entirely, exactly like `CopulaInVivoSampler`
+already does for its own covered columns (see Milestone 24). Both modes
+coexist: any column not named in `explicit_ranges` keeps the existing
+default `[0, 1) -> quantify_params()` behavior, unaffected -- verified
+directly (a `'d'` column left out of `explicit_ranges` stayed on the
+default `[0, 1]`-quantified path in the same call that sampled `'g'`
+directly in `[50, 100]`). Raises `KeyError` immediately (constructor
+time, not deep in `sample()`) for an unrecognized key. Verified end to
+end against `cows.json`'s real basis set:
+`UniformRangeSampler(pm, explicit_ranges={'snr': (5.0, 30.0)})` samples
+directly in `[5, 30]` as requested.
+
+**Tests**: 6 new in `tests/test_sampling.py` (bypasses
+`quantify_params()`, leaves other columns on the default path, seeded
+reproducibility with both modes active, metadata records which columns
+were explicit, and the unknown-key rejection). Full suite: 157/157
+passing.
+
+## Section 13 (testing) -- ideas not yet implemented
+
+Requested directly: keep a running list of concrete testing ideas for
+section 13 that haven't been acted on yet, so they aren't lost between
+sessions. Cross-referenced against the section's own checklist
+(handover doc section 13) and what's landed so far (relaxation,
+parameter registry, nuisance removal, CRLB, NIfTI-MRS, provenance,
+sampling, noise generation/target-vs-realized SNR, baseline generation --
+Milestones 22/25/26):
+
+- **Residual-water generation**: no dedicated test file yet (parallels
+  `test_baselines.py` -- residual water is generated by the same
+  `bounded_random_walk`/`batch_smooth` machinery in
+  `PhysicsModel.residual_water()`, but the water-specific config
+  handling in `sample_resWater()`/`prepareConfig()` -- e.g. the
+  `cropRange_water` special-casing that forces `start`/`end` to `[0]` --
+  has no direct test).
+- **Paired basis-set / difference-editing simulations**: `diff_edit`
+  handling in `forward()` is explicitly marked `'''Not implemented yet'''`
+  in one branch (physics_model.py) but the `difference_editing_fids`
+  setup in `initialize()` is live -- needs a test confirming ON/OFF pairs
+  actually differ by the edited metabolite's contribution and agree
+  everywhere else, once the "not implemented yet" branch is resolved one
+  way or the other.
+- **Complex observation handling**: no direct test that real/imaginary
+  channel semantics stay correct end-to-end through a full `forward()`
+  call (individual pieces are implicitly checked -- e.g. the NIfTI
+  frequency-sign fix -- but nothing exercises "does channel 0 always mean
+  real, channel 1 always imaginary" as its own invariant across the
+  pipeline).
+- **Zero-filling and CRLB exclusion of zero-filled points**: `compute_crlb()`
+  already accepts a `mask` parameter for exactly this (module docstring:
+  "Zero-filled points... are excluded from the observation vector"), but
+  there is no test constructing a zero-filled signal, building the
+  corresponding mask, and confirming CRLB actually ignores those points
+  (e.g. that the FIM is unaffected by whatever garbage values sit in the
+  zero-filled region).
+- **Batch / n-dimensional operation**: no systematic test sweeping batch
+  size (1 vs. many) and the various optional stacked axes (multicoil
+  transients, noisy/clean, difference-editing ON/OFF) in combination --
+  individual bugs in this area were found and fixed ad hoc (Milestones 8,
+  10, 11) but there's no regression suite that would catch a *new* one of
+  the same shape.
+- **Committed (not just manual) coverage for target-vs-realized SNR at
+  the full `forward()` level**: Milestone 22's fix is verified against a
+  real basis set, documented with exact numbers, but not as a committed
+  test (needs a real `PhysicsModel`). Worth a lighter-weight version:
+  a fake `PhysicsModel`-like object (mirroring `test_sampling.py`'s
+  `FakePhysicsModel` or `test_mainFcns_nifti_export_wiring.py`'s fake
+  `PhysicsModel`) exercising just `line_summing()` +
+  `generate_noise()` + the `pSNR`/`sSNR` scaling together, rather than
+  all of `forward()`.
+- **Committed coverage for "enabling/disabling individual components"**
+  (Milestone 23's `fit_baseline_spline`/`compute_crlb` gating, and
+  `collect_provenance`): currently verified manually against a real
+  basis set only, for the same "`_compile_result()` needs a real
+  `PhysicsModel`" reason as above.
+- **Regression test for the specific bug class the handover doc calls
+  out by name** ("residual water enabled but absent from plotted/output
+  spectra"): not yet given its own explicit test tying `residual_water`
+  config -> `SimulationResult.residual_water` (or the legacy tuple's
+  equivalent) being genuinely present and non-zero in the final output,
+  as opposed to merely not crashing.
+- **Parameter replay round-trip test using a real basis set's actual
+  numbers**: `SimulationParameters.save()`/`.load()` (Milestone 9) has
+  unit coverage, but no test replays a saved parameter set through a
+  *second*, independently-constructed `PhysicsModel` instance and checks
+  the resulting spectrum matches the original bit-for-bit (the actual
+  guarantee "parameter replay" is meant to provide).
 
 ## Not yet started
 
