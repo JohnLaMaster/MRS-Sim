@@ -209,3 +209,40 @@ def test_apply_t1_scaling_uses_t1_star_when_flip_angle_given():
     # Sanity: T1* and plain T1 recovery genuinely differ away from 90 degrees
     plain_factor = t1_recovery(TR=TR_ms / 1000.0, T1=t1_values_ms / 1000.0)
     assert not torch.allclose(expected_factor, plain_factor)
+
+
+# ---------------------------------------------------------------------------
+# 'g' vs. b0=True double-counting guard (handover section 11 audit).
+# Confirmed live in 4 shipped configs (docs/v2/progress_log.md); MM/lipid
+# lines are exempt per the repo owner directly.
+# ---------------------------------------------------------------------------
+
+def test_check_g_b0_double_counting_raises_when_metab_g_nonzero():
+    g_cols = (0, 1, 2, 3, 4)  # 3 real metabolite lines + 2 MM lines
+    max_ranges = torch.zeros(1, 5)
+    max_ranges[0, 0:3] = 20.0  # nonzero metabolite 'g' range
+    with pytest.raises(ValueError):
+        PhysicsModel._check_g_b0_double_counting(g_cols, n_mm_lines=2, max_ranges=max_ranges)
+
+
+def test_check_g_b0_double_counting_allows_zero_metab_g():
+    g_cols = (0, 1, 2, 3, 4)
+    max_ranges = torch.zeros(1, 5)
+    PhysicsModel._check_g_b0_double_counting(g_cols, n_mm_lines=2, max_ranges=max_ranges)  # no raise
+
+
+def test_check_g_b0_double_counting_exempts_mm_lipid_lines():
+    """Per the repo owner directly: MM/lipid 'g' may remain nonzero
+    alongside b0=True -- only metabolite lines are checked."""
+    g_cols = (0, 1, 2, 3, 4)
+    max_ranges = torch.zeros(1, 5)
+    max_ranges[0, 3:5] = 20.0  # nonzero MM-only 'g' range, metab g stays 0
+    PhysicsModel._check_g_b0_double_counting(g_cols, n_mm_lines=2, max_ranges=max_ranges)  # no raise
+
+
+def test_check_g_b0_double_counting_no_mm_lines():
+    g_cols = (0, 1, 2)
+    max_ranges = torch.zeros(1, 3)
+    max_ranges[0, :] = 20.0
+    with pytest.raises(ValueError):
+        PhysicsModel._check_g_b0_double_counting(g_cols, n_mm_lines=0, max_ranges=max_ranges)

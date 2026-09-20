@@ -1517,10 +1517,107 @@ three new `build_header_fields()` fields (present/absent-`lw` cases, the
 always-`False` decay flags) and a regression check that `t` still starts
 at 0. Full suite: 130/130 passing.
 
-**Open, undecided (repo owner's call)**: whether/how to guard the `g`/
-`b0` double-counting (Finding 2) -- a hard error (mirroring `b0`/`V1_0`),
-an authoritative-default choice, or something else. Flagged directly
-rather than assumed.
+**Resolved in Milestone 20 below**: the `g`/`b0` guard question (Finding
+2) and the SNR-decibel question raised while reviewing this milestone's
+own documentation.
+
+## Milestone 20 — SNR is unitless (not decibels): real bug fixed; 'g'/b0 guard implemented (commit TBD)
+
+**Handover sections addressed**: 7 (SNR) and 11 (double-application),
+follow-up to Milestones 18-19, both resolved directly by the repo owner.
+
+**Correction and a real bug it uncovered**: while documenting Milestone
+18's SNR audit, I incorrectly described `target_snr` as being "in
+decibels" -- the repo owner corrected this directly: SNR in MRS is a
+unitless ratio, never decibels, per expert consensus. That correction led
+to checking whether `generate_noise()`'s own `lin_snr = 10**(param / 10)
+# convert from decibels to linear scale` was still live code or a dead
+leftover (asked directly by the repo owner) -- confirmed live: this
+function is shared by both `compile_outputs()` (every existing caller)
+and `_compile_result()`, executed on every simulation with `noise=True`;
+grepped the whole codebase and found no other dB<->linear conversion for
+SNR anywhere. Per the repo owner's explicit instruction ("It should not
+be active in the legacy code or this updated code"), **removed** -- `lin_
+snr = param` now, using the sampled `'snr'` column directly as the
+unitless ratio. This is a real behavior change to every noisy simulation
+(not just a documentation fix): config ranges like `cows.json`'s `"snr":
+[10, 20]` and `artifacts.mat`'s default `[0, 100]` now mean what they
+look like they mean (a plain ratio of 10-20, or up to 100) rather than
+being additionally exponentiated (`10**(20/10)=100`, `10**(100/10)=10
+billion` under the old, incorrect formula). Updated the stale historical
+docstring in `generate_noise()` (which quoted "8.5278dB"-style figures
+from before this fix) to note those numbers no longer reflect current
+behavior. Updated `SimulationResult`'s field comments and `provenance.
+py`'s `snr_definitions` to say "unitless ratio" throughout, not decibels.
+
+**Verification caveat, reported honestly rather than glossed over**: an
+end-to-end check against `cows.json`'s real basis set (target SNR = 15,
+batch of 200) found `realized_snr['spectral']` at the `snr_metab` line
+averaging ~680 -- roughly 45x the target, not a close match. Fixing the
+decibel-formula bug did not reconcile target vs. realized SNR into close
+agreement; this appears to be the same "I still don't know why the
+overall SNRs vary so much" gap the original author already documented in
+`generate_noise()`'s own docstring (pre-existing, not introduced by this
+fix), not something this specific fix was expected to resolve. Not
+root-caused further in this pass -- flagged here rather than left
+implicit, in case it's worth a dedicated follow-up.
+
+**'g'/`b0` double-counting guard (Finding 2 from Milestone 19)**: repo
+owner's decision -- raise a clear error like the `b0`/`V1_0` guard, with
+a caveat: "It can be applied to the macromolecule and lipid signals even
+when B0 is used, but only one of them should be applied to metabolites."
+Investigating how to implement the metabolite-vs-MM/lipid distinction
+surfaced a related, previously-unnoticed fact about the parameter
+registry: `'dmm'`/`'gmm'` (which the `names`/`mult` list in `initialize()`
+appears to define as separate MM-only linewidth parameters) are **not
+actually part of `self.index` at all** -- confirmed directly against a
+real model (`cows.json`'s basis, `pm.MM=8`): `'dmm'`/`'gmm'` raise
+`KeyError` on `self.index`, while `self.index['g']`/`self.index['d']`
+each have all 28 entries (20 real metabolites + 8 MM/lipid lines
+together, in `self._metab`'s order -- `order_metab()`, `src/aux/aux.py`).
+So metabolite and MM/lipid lines already share one combined, per-line
+`'g'` array; there was never a separate `'gmm'` mechanism actually wired
+up despite the `names`/`mult` list implying one. This didn't block
+implementing the requested guard -- `self._metab`'s known ordering
+(metabolites first, then MM/lipid) plus `self.MM` (the MM/lipid count)
+is enough to slice the metabolite-only leading columns out of the
+combined `'g'` index without needing a separate `'gmm'` key -- but it's
+worth knowing that `'dmm'`/`'gmm'` are effectively vestigial right now:
+they occupy columns in the sampled parameter tensor and get a range
+computed for them, but nothing ever reads a value out of them by name.
+Not fixed/removed in this pass (out of scope; flagged here).
+
+Implemented `PhysicsModel._check_g_b0_double_counting(g_cols, n_mm_lines,
+max_ranges)` (static, extracted for direct testability without a real
+basis set, mirroring `_resolve_t1_config`/`_apply_t1_scaling`'s pattern):
+raises `ValueError` when `b0=True` and the *configured range* (not a
+specific sampled batch's values -- deterministic given config, matching
+the `b0`/`V1_0` guard's style) for any metabolite-only `'g'` column is
+nonzero; MM/lipid columns (the trailing `self.MM` entries of `self.index
+['g']`) are exempt. Called from `forward()` right after the existing
+`b0`/`V1_0` check. Verified end to end:
+- `src/config/predefined/B0_samples.json` (one of the 4 previously
+  confirmed-affected configs, patched only to add a missing unrelated
+  `snr_metab` key so `prepare()` would run) now correctly raises.
+- `cows.json` (`b0=False`) is unaffected, as expected.
+- A direct test against `cows.json`'s real basis set with metabolite `'g'`
+  range manually zeroed and MM `'g'` range left nonzero, `b0=True`: no
+  raise -- confirms the MM/lipid exemption actually works, not just that
+  the guard fires at all.
+
+**Not yet done**: the 3 other affected shipped configs
+(`B0_samples_15.json`, `templates/B0_samples.json`,
+`clean_PRESS_144_GE.json`) still need their own metabolite `'g'` ranges
+adjusted (e.g. to 0) now that this guard will reject them as-is --
+left for the repo owner to decide the intended values for, rather than
+guessed here.
+
+**Tests**: 4 new in `tests/test_physics_model_bugfixes.py` covering
+`_check_g_b0_double_counting`'s raise/no-raise/MM-exemption/no-MM-lines
+cases. No new committed test for the SNR formula fix itself (it's a
+one-line, directly-inspectable change; the existing SNR-shape tests in
+the same file already exercise `generate_noise()`'s surrounding code).
+Full suite: 134/134 passing.
 
 ## Not yet started
 

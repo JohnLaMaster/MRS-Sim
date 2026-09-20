@@ -195,12 +195,12 @@ def collect_provenance(
                 'Sampled per-sample target SNR (unitless ratio, per MRS '
                 'expert-consensus convention), stored in '
                 'params[:, index["snr"]] -- referenced against the peak '
-                'amplitude of pm.snr_metab (defaults to wrt_metab). Note: '
-                'generate_noise() internally applies a decibel-style log '
-                'conversion to this stored value before using it -- '
-                'flagged as an open question (docs/v2/progress_log.md, '
-                'handover section 7 audit) about whether that internal '
-                'conversion needs revisiting, not settled here.'
+                'amplitude of pm.snr_metab (defaults to wrt_metab). '
+                'generate_noise() previously applied an incorrect '
+                'decibel-style log conversion to this value before using '
+                'it; removed as of the handover section 7 audit (see '
+                'docs/v2/progress_log.md) -- the stored value is used '
+                'directly as the linear ratio.'
             ),
             'realized_snr': (
                 'Computed post-noise-generation from the actual drawn noise '

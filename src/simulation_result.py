@@ -53,22 +53,18 @@ class SimulationResult:
     parameters: Optional[SimulationParameters] = None
 
     # Handover section 7 audit (docs/v2/progress_log.md): target_snr and
-    # realized_snr are not measured against the same signal, and
-    # generate_noise() internally applies a decibel-style log conversion
-    # to the sampled target_snr column even though SNR in MRS is a
-    # unitless ratio (per the repo owner's expert-consensus correction --
-    # see generate_noise()'s own comment/formula, flagged as an open
-    # question about whether that internal conversion itself needs
-    # revisiting, not settled here). Both facts are documented explicitly
-    # here instead of left as an implicit trap for anyone comparing the
-    # two directly.
+    # realized_snr are not measured against the same signal -- documented
+    # explicitly here instead of left as an implicit trap for anyone
+    # comparing the two directly. SNR in MRS is a unitless ratio (per the
+    # repo owner directly); generate_noise() used to apply an incorrect
+    # decibel-style `10**(param/10)` conversion to the sampled target_snr
+    # column before this audit -- removed, `param` is now used directly.
     #
-    # `target_snr` ([batch]): the sampled target SNR
+    # `target_snr` ([batch], unitless ratio): the sampled target SNR
     # (params[:, index['snr']]) used to derive the noise standard
     # deviation in generate_noise() -- referenced against the peak
     # amplitude of the metabolite line(s) named in `pm.snr_metab`
-    # (defaults to `pm.wrt_metab`). SNR itself is unitless (a plain
-    # ratio); see the note above re: generate_noise()'s internal handling.
+    # (defaults to `pm.wrt_metab`).
     target_snr: Optional[torch.Tensor] = None
 
     # `realized_snr` (dict with 'power'/'spectral' keys, each

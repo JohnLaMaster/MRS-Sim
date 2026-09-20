@@ -1000,12 +1000,17 @@ class PhysicsModel(nn.Module):
 
         Without MM/Lip, the mean PCr SNR = 8.5278dB. Parameters set to 8.6dB. STD=0.8199
           min/max = 7.2079/9.7023
-        This is MUCH more reasonable, but I still don't know where the problem comes from so I can 
+        This is MUCH more reasonable, but I still don't know where the problem comes from so I can
         adjust the simulations to get more accurate nosie profiles.
 
-
-
-
+        NOTE (v2.0, handover section 7 audit): the "dB" figures above were
+        recorded under the old (incorrect) `10**(param/10)` decibel-style
+        conversion this function used to apply to `param`. SNR is a
+        unitless ratio in MRS, confirmed directly with the repo owner;
+        that conversion has been removed (`lin_snr = param` now). These
+        historical numbers no longer reflect current behavior and are
+        kept only as a record of the original author's own investigation
+        into realized-SNR variance -- not a target to reproduce.
         '''
         # Set variables in case of multicoil transients
         zeros, d = torch.where(zeros<=0.0,1,0).sum(dim=-1,keepdims=True), -4
@@ -1014,7 +1019,20 @@ class PhysicsModel(nn.Module):
         for _ in range(fid.ndim-max_val.ndim): max_val = max_val.unsqueeze(-1)
         for _ in range(fid.ndim-param.ndim): param = param.unsqueeze(-1)
 
-        lin_snr = 10**(param / 10) # convert from decibels to linear scale
+        # BUGFIX (v2.0, handover section 7 audit): SNR is a unitless
+        # ratio in MRS (confirmed directly with the repo owner) -- it is
+        # never expressed in decibels. `param` (the sampled 'snr' column)
+        # is therefore already the linear ratio to use directly; the
+        # previous `10**(param / 10)` "decibel to linear" conversion had
+        # no basis (nothing upstream ever samples 'snr' as a dB value --
+        # config ranges like cows.json's [10, 20] and artifacts.mat's
+        # default [0, 100] are plausible plain ratios, not plausible dB
+        # figures) and was live on every noisy simulation (this function
+        # is shared by both compile_outputs() and _compile_result()), not
+        # dead/leftover code. Confirmed via direct grep that no other
+        # dB<->linear conversion exists anywhere else in the codebase for
+        # SNR. See docs/v2/progress_log.md for the full audit.
+        lin_snr = param
         if not isinstance(transients, type(None)):
             # BUGFIX (v2.0): this hardcoded two unsqueezes for `zeros`,
             # assuming it needed to go from 2-D ([bS, 1], after the
@@ -1206,6 +1224,46 @@ class PhysicsModel(nn.Module):
         else:
             factor = t1_recovery(TR=TR_seconds, T1=T1_seconds)
         return amp * factor
+
+    @staticmethod
+    def _check_g_b0_double_counting(g_cols, n_mm_lines: int,
+                                    max_ranges: torch.Tensor) -> None:
+        '''
+        Raises ValueError if b0=True (the caller only calls this when
+        b0=True) and the configured range for any METABOLITE line's 'g'
+        (Gaussian broadening, part of the Voigt lineshape) is nonzero --
+        both model the same intra-voxel B0-inhomogeneity broadening (see
+        forward()'s call site comment and docs/v2/progress_log.md, section
+        11 audit). MM/lipid lines are exempt per the repo owner directly.
+
+        `g_cols`: self.index['g'], every line in self._metab's order
+        (real metabolites first, then MM/lipid -- order_metab(), src/aux/
+        aux.py). `n_mm_lines`: self.MM (0/False if there are none) -- the
+        trailing this-many entries of `g_cols` are MM/lipid, exempt.
+        `max_ranges`: self.max_ranges (checked, not a specific sampled
+        batch's values, so this is deterministic given the config).
+
+        Extracted as a static, PhysicsModel-instance-free method so it's
+        directly testable without constructing a full model (needs a real
+        basis-set file -- see test_parameters.py's module docstring).
+        '''
+        n_metab_lines = len(g_cols) - n_mm_lines
+        metab_g_cols = g_cols[:n_metab_lines] if n_metab_lines else ()
+        if metab_g_cols and torch.any(max_ranges[0, list(metab_g_cols)] != 0):
+            raise ValueError(
+                "b0=True (explicit spatial B0 field-inhomogeneity "
+                "simulation) and a nonzero 'g' range for METABOLITE "
+                "lines (Gaussian broadening, part of the Voigt "
+                "lineshape) both model the same intra-voxel field-"
+                "inhomogeneity broadening, and would double-count it "
+                "if used together -- see docs/v2/progress_log.md. "
+                "Use one or the other: b0=True with metabolite 'g' "
+                "fixed at 0 (the B0 field simulator supplies the "
+                "broadening), or b0=False with 'g' sampled normally. "
+                "MM/lipid lines' 'g' (self.MM of the trailing "
+                "self.index['g'] columns) are unaffected by this "
+                "check and may remain nonzero alongside b0=True."
+            )
 
     def refine_noise(self,
                      fid_shape, # fid.shape[-1]
@@ -1707,6 +1765,34 @@ class PhysicsModel(nn.Module):
                 "effect), or b0=False with V1_0=False (the T2* amplitude "
                 "term supplies it instead)."
             )
+
+        # BUGFIX guard (v2.0, handover section 11 audit): 'g' (sampled
+        # Gaussian broadening, part of the Voigt lineshape) and b0=True
+        # both model the same intra-voxel B0-inhomogeneity broadening for
+        # METABOLITE lines -- confirmed directly against the paper this
+        # code implements ("the Voigt lineshape's Gaussian component is
+        # *also* meant to represent inhomogeneous broadening from
+        # intra-voxel field variation -- the same physical effect
+        # B0_inhomogeneities() explicitly simulates spatially, just
+        # modeled as a simple Gaussian statistical assumption instead" --
+        # see docs/v2/progress_log.md). Unlike b0/V1_0 above, there was no
+        # guard for this at all; confirmed live (not just theoretical) in
+        # 4 shipped configs with b0=True and a nonzero '_g' range.
+        #
+        # Per the repo owner directly: MM/lipid lines are EXEMPT -- only
+        # metabolite lines' 'g' may not be nonzero alongside b0=True.
+        # self.index['g'] covers every line in self._metab's order (real
+        # metabolites first, then MM/lipid -- order_metab(), src/aux/
+        # aux.py), so the metabolite-only columns are the leading
+        # `len(self.index['g']) - self.MM` entries. Checked against the
+        # *configured range* (self.max_ranges), not a specific sampled
+        # batch's values, so this raises deterministically based on
+        # config rather than intermittently based on what a given batch
+        # happened to draw -- matching the b0/V1_0 guard's style above.
+        if b0:
+            self._check_g_b0_double_counting(
+                g_cols=self.index['g'], n_mm_lines=self.MM if self.MM else 0,
+                max_ranges=self.max_ranges)
 
         # B0 inhomogeneities
         if b0:
