@@ -1587,6 +1587,31 @@ class PhysicsModel(nn.Module):
         
         if params.ndim==1: params = params.unsqueeze(0) # Allows batchSize = 1
 
+        # BUGFIX guard (v2.0): b0=True (B0_inhomogeneities/
+        # add_inhomogeneities) explicitly simulates spatial B0 field
+        # variation across the voxel and multiplies the FID by the
+        # resulting intra-voxel dephasing kernel -- this *is* the physical
+        # mechanism that turns intrinsic T2 into apparent T2* (confirmed
+        # directly with the repo owner). The V1_0=False T2* amplitude
+        # scaling added in this refactor (exp(-TE/T2*) via the sampled
+        # 'd') models that same T2->T2* conversion as a fixed scalar
+        # instead. Enabling both would double-count it. Since the repo
+        # owner's existing B0 field simulator is the more detailed,
+        # explicit model of the two, raise a clear error rather than
+        # silently double-applying -- per "use clear error messages for
+        # incompatible configurations."
+        if b0 and not self.V1_0:
+            raise ValueError(
+                "b0=True (explicit spatial B0 field-inhomogeneity "
+                "simulation) and V1_0=False (T2* amplitude scaling via "
+                "exp(-TE/T2*)) both model the T2 -> T2* conversion from "
+                "intra-voxel field inhomogeneity, and would double-count "
+                "it if used together. Use one or the other: b0=True with "
+                "V1_0=True (the B0 field simulator supplies the T2* "
+                "effect), or b0=False with V1_0=False (the T2* amplitude "
+                "term supplies it instead)."
+            )
+
         # B0 inhomogeneities
         if b0:
         #     if gen: print('>>>>> Simulating B0 field heterogeneities')
