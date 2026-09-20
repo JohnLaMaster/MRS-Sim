@@ -26,6 +26,8 @@ class Mat2NIfTI_MRS():
     def __init__(self,
                  combine_complex: bool=True,
                  test_output: bool=True,
+                 ppm_reference: float=4.65,
+                 expected_peak_ppm: float=None,
                  ):
         NIFTIOrient = './src/NIfTIMRS/NIFTIOrient_object.pkl'
         with open(NIFTIOrient,'rb') as file:
@@ -33,6 +35,14 @@ class Mat2NIfTI_MRS():
 
         self.combine_complex = combine_complex
         self.test = test_output
+        # v2.0: the water-reference peak location used both to reference the
+        # exported ppm axis and (optionally) to sanity-check where the
+        # dominant simulated peak actually lands was previously hardcoded to
+        # 4.65 in test_output(). Exposed here so callers whose dominant peak
+        # isn't water at 4.65ppm (or who use a different water-ppm
+        # convention) can override it; defaults preserve prior behavior.
+        self.ppm_reference = ppm_reference
+        self.expected_peak_ppm = expected_peak_ppm if expected_peak_ppm is not None else ppm_reference
 
 
     def forward(self, 
@@ -80,6 +90,26 @@ class Mat2NIfTI_MRS():
             # print("specDataCmplx.shape after: ",specDataCmplx.shape)
             # specDataCmplx = np.squeeze(specDataCmplx,axis=-2)
 
+            # BUGFIX (v2.0): MRS-Sim's internal ppm axis is built as
+            # ppm = +f_Hz/sf + centerFreq (ascending with array index --
+            # confirmed directly against src/aux/process_basis_functions.py
+            # and empirically against real basis sets: NAA's known 2.0ppm
+            # singlet lands at the index this formula predicts). The
+            # NIfTI-MRS / Levitt convention (confirmed directly against the
+            # spec text) is the mirror image: ppm = -f_Hz/f0 + ref. Fed the
+            # raw FID as-is, a spec-compliant reader places that same NAA
+            # peak at 7.29ppm instead of 2.0ppm. Confirmed empirically that
+            # a pure left-right reorder (in either the time or frequency
+            # domain) also "fixes" the peak location but reverses the FID's
+            # decay direction (violates the spec's separate "increasing
+            # time" requirement) -- conjugation is the only operation that
+            # corrects the frequency-sign convention while leaving the
+            # time-domain decay envelope exactly unchanged (|conj(fid)| ==
+            # |fid| at every timepoint). Applied at export time only --
+            # the internal simulation/plotting convention (and plot_mrs.py's
+            # own display-only invert_xaxis() correction) is untouched.
+            specDataCmplx = specDataCmplx.conj()
+
         # Reshape data to fit into the container
         x, y = reshape if not isinstance(reshape, type(None)) else 1, 1
         z = int(specDataCmplx.shape[0] / (x*y))
@@ -88,7 +118,14 @@ class Mat2NIfTI_MRS():
 
         path, name = os.path.split(datapath)
         save_name = os.path.splitext(name)[0]
-        if label: save_name = os.path.join(save_name, label)
+        # BUGFIX (v2.0): os.path.join(save_name, label) built a *subdirectory*
+        # path (e.g. "dataset_spectra_0/noise_free") rather than a sibling
+        # filename -- nothing ever creates that subdirectory, so nib.save()
+        # would raise FileNotFoundError the first time this (previously
+        # unreachable -- see mainFcns.simulate()) branch actually ran. A
+        # plain suffix keeps the noise-free export next to, and named after,
+        # its corresponding simulated-data file.
+        if label: save_name = f"{save_name}_{label}"
 
         # Define the metadata
         json_full, meta_dict = self.set_metadata(name, header)
@@ -223,8 +260,8 @@ class Mat2NIfTI_MRS():
         test_nifti_mrs_conventions(
             save_path,
             save_name,
-            expected_peak_ppm=4.65,   # set to your dominant simulated peak
-            ppm_reference=4.65,
+            expected_peak_ppm=self.expected_peak_ppm,
+            ppm_reference=self.ppm_reference,
             allow_unlocalised=True,   # True for simulations
         )
 

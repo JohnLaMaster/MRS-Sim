@@ -1054,6 +1054,152 @@ the dwelltime derivation, and the `RepetitionTime` null check. Full suite:
   little-used `snr_filter` feature was active during simulation; not
   exercised this session.
 
+## Milestone 15 — NIfTI-MRS frequency-sign convention, T1/T1* config surface, T1 database placeholders (commit TBD)
+
+**Handover section addressed**: 12 (NIfTI-MRS export audit, continued) and
+10 (relaxation/TE/TR, continued).
+
+**Context**: repo owner asked four things in one message: (1) how do we
+confirm MRS-Sim's exported data follows the NIfTI-MRS left-right/direction
+convention, (2) add a config sub-dictionary for T1/T1* parameters (opt-in,
+not activated -- no literature T1 data exists yet), (3) add schema space
+for T1 in `metabolites_database.json` for the repo owner to fill in later,
+(4) make the hardcoded 4.65ppm water-reference peak in
+`mat2niftimrs.py`'s `test_output()` configurable.
+
+**Finding 1 -- the NIfTI-MRS frequency-sign convention was violated,
+confirmed empirically against real basis sets, not just derived**:
+fetched the NIfTI-MRS spec text directly (wtclarke/mrs_nifti_standard).
+Two separate conventions are stated: (a) time-domain data must be stored
+in order of increasing time; (b) the frequency axis follows the Levitt
+convention (`ω=-γB0`), under which more-deshielded (higher-ppm) ¹H
+resonances land on the left/low-index side once Fourier-transformed by a
+compliant reader.
+
+Checked (a) first: `self.t` is built ascending from 0 in
+`process_basis_functions.py` and never reordered anywhere in
+`physics_model.py` -- compliant.
+
+Checked (b) empirically using `src/basis_sets/PRESS_30_GE_2000.mat` and
+`VERI_PRESS_30ms_GE_2000_wMM.mat` (both real basis sets, same result):
+took NAA's raw stored FID exactly as `mat2niftimrs.py` would export it
+(confirmed `NIfTIMRS: true` is only ever paired with `fids: true` across
+every config in the repo, i.e. genuine time-domain data, not an
+already-Fourier-transformed spectrum mislabeled as one), ran it through
+the spec's own `S(f) = fftshift(fft(fid))` + `ppm = -f_Hz/f0 + ref`
+formula, and found the dominant NAA singlet at **7.29 ppm instead of the
+correct 2.0 ppm**. Root cause: MRS-Sim's own ppm axis is built as
+`ppm = +f_Hz/sf + centerFreq` (`process_basis_functions.py`) -- the
+*mirror image* of the spec's `ppm = -f_Hz/f0 + ref`. This has always been
+true of MRS-Sim's internal convention (compensated for only at *display*
+time, via `plot_mrs.py`'s `invert_xaxis()`), but was never corrected for
+NIfTI-MRS export, since that export path didn't produce valid output at
+all before Milestone 14.
+
+**A wrong fix proposed and corrected by the repo owner**: first proposed
+conjugating the FID at export time. The repo owner rejected this
+("Absolutely not... Do not change the phase or order of the real/imag
+components") having read it (incorrectly, but understandably from how it
+was described) as discarding the imaginary component, and proposed a
+plain left-right flip instead. Tested the flip empirically, two ways
+(direct time-domain array reversal, and FFT→reverse→inverse-FFT) against
+the same real NAA data: **both do fix the ppm assignment but provably
+reverse the FID's decay direction** (amplitude goes from
+`~173` at the start / `~0.0008` at the end to the reverse) -- a textbook
+Fourier-pair fact (frequency-domain reversal without conjugation is
+mathematically equivalent to true time-domain reversal), not a coding
+error, but a genuine conflict between the spec's two stated conventions
+under a reordering-only fix. Presented this concrete trade-off (with the
+numbers) back to the repo owner, who then approved conjugation with the
+misunderstanding cleared up (it negates each sample's phase but keeps the
+data fully complex; it does not discard the imaginary channel).
+
+**Fix applied**: `Mat2NIfTI_MRS.forward()` conjugates the combined
+complex array (`specDataCmplx = specDataCmplx.conj()`) immediately after
+the real/imaginary combining step, at NIfTI-MRS export time only --
+`physics_model.py`'s and `plot_mrs.py`'s own conventions are untouched.
+Verified: `|conj(fid)|` is identical to `|fid|` at every timepoint, so the
+"increasing time" convention is unaffected; a spec-compliant reader now
+places a known synthetic resonance at its correct ppm (verified to
+within 0.05 ppm via `torch.fft`/`np.fft` round-trip, both on real NAA data
+and in the new committed regression test).
+
+**A related bug found while testing, not fixed**: constructing a test
+dataset with `batch=1` *and* `noisy/clean axis=1` together revealed that
+`scipy.io.loadmat(..., squeeze_me=True)` squeezes *both* size-1 axes away
+at once in that case, leaving a 2-D array that `mat2niftimrs.py`'s
+existing `if specDataCmplx.ndim==3` restoration (added in Milestone 14)
+doesn't cover -- it only restores a *single* squeezed axis. This
+silently corrupts the data far worse than the Milestone-14 bug (the
+length axis itself gets mistaken for the noisy/clean axis and mostly
+discarded). Not exercised in the new test (sidestepped with `batch=2`
+instead, matching the existing tests' pattern) and not fixed --
+recorded here as a real edge case (single-sample-batch NIfTI-MRS export)
+for a future pass.
+
+**Task 2 -- T1/T1* config surface**: not yet started at time of writing
+this entry (see "Remaining/follow-up" below for the plan).
+
+**Task 3 -- T1 database placeholders**: not yet started.
+
+**Task 4 -- configurable 4.65ppm reference**: done. `Mat2NIfTI_MRS.__init__`
+gained `ppm_reference: float=4.65` and `expected_peak_ppm: float=None`
+(defaults to `ppm_reference` when unset), both threaded through to
+`test_nifti_mrs_conventions()` in `test_output()` in place of the two
+hardcoded `4.65` literals. Defaults preserve prior behavior exactly.
+
+**Tests**: 2 new in `tests/test_nifti_export.py` --
+`test_export_corrects_nifti_mrs_frequency_sign_convention` (synthetic
+single-tone FID at a known offset frequency, checked against the spec's
+own formula independently of MRS-Sim's convention, so it can't trivially
+agree with whatever MRS-Sim itself writes) and
+`test_export_uses_configurable_reference_peak_not_hardcoded_4_65ppm`
+(would fail under the old hardcoded 4.65 for a non-water-referenced
+peak). Full suite: 106/106 passing.
+
+**Follow-up, same session -- the noise-free/clean counterpart was
+silently dropped from NIfTI-MRS export entirely**: the repo owner asked
+how the noisy vs. noise-free variants are exported, given NIfTI-MRS is
+meant to hold one set of spectra. Checked the actual call sites (not just
+`Mat2NIfTI_MRS.forward()` in isolation): `mainFcns.simulate()` calls
+`save2nifti.forward(datapath=new_path)` twice (lines 195, 213 before this
+fix), *always* with no `label` argument. Inside `forward()`, the
+`label=None` branch always selects index 0 (noisy) --
+`label='noise_free'` (which would select index 1, the clean counterpart)
+was never invoked anywhere in the codebase. Worse, that unreachable
+branch was also broken: `save_name = os.path.join(save_name, label)`
+builds a *subdirectory* path (e.g. `dataset_spectra_0/noise_free`), and
+nothing creates that subdirectory, so `nib.save()` would raise
+`FileNotFoundError` the first time it actually ran.
+
+The repo owner's direction: export the clean version as an independent,
+opt-in *request* (not tied to whether noise happened to be simulated --
+"not all simulations will need the clean version"), and give it an
+appended name pairing it with its corresponding data file, not a
+subdirectory.
+
+**Fix**: (1) `mat2niftimrs.py`'s `save_name` join changed from
+`os.path.join(save_name, label)` to `f"{save_name}_{label}"` -- a sibling
+filename suffix (`dataset_spectra_0_noise_free.nii.gz`) instead of a
+non-existent subdirectory. (2) `mainFcns.simulate()` gained a second,
+config-gated export call at both save sites:
+`if getattr(config, 'NIfTIMRS_noise_free', False): save2nifti.forward(datapath=new_path, label='noise_free')`
+-- `getattr` with a `False` default so existing configs that predate this
+key are unaffected (matches the `V1_0`/`metabolite_database_overrides`
+pattern). Not added to any existing config file, including `kelley.json`
+(the only config with `NIfTIMRS: true`) -- opt-in per the repo owner's
+"not all simulations will need it".
+
+**Tests**: 1 new in `tests/test_nifti_export.py`
+(`test_export_noise_free_label_writes_a_sibling_file_not_a_subdirectory`,
+confirms both the sibling-file naming and that index 1, not index 0, is
+what gets written) and a new file,
+`tests/test_mainFcns_nifti_export_wiring.py` (3 tests, using a fake
+`PhysicsModel` -- no real basis set needed -- to exercise
+`mainFcns.simulate()`'s actual control flow: the flag off by default, on
+when requested, and off when the config key is absent entirely). Full
+suite: 110/110 passing.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across

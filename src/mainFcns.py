@@ -193,6 +193,13 @@ def simulate(inputs, args=None):
             print('new_path: ',new_path)
             if config.NIfTIMRS:
                 save2nifti.forward(datapath=new_path)
+                # v2.0: opt-in, independent of whether noise was simulated --
+                # NIfTI-MRS is meant to hold one set of spectra, so the
+                # noise-free counterpart (when present) is written as its
+                # own sibling file only when explicitly requested, not
+                # bundled into or silently dropped from the noisy export.
+                if getattr(config, 'NIfTIMRS_noise_free', False):
+                    save2nifti.forward(datapath=new_path, label='noise_free')
             first = True
             counter += 1
             print('>>> ** {} ** <<<'.format(counter))
@@ -211,5 +218,7 @@ def simulate(inputs, args=None):
             print('new_path: ',new_path)
             if config.NIfTIMRS:
                 save2nifti.forward(datapath=new_path)
+                if getattr(config, 'NIfTIMRS_noise_free', False):
+                    save2nifti.forward(datapath=new_path, label='noise_free')
         del spectra, fit, baseline, reswater, parameters, quantities
     return path
