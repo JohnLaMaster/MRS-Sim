@@ -15,6 +15,7 @@ from numpy import pi
 from .aux import *
 from .baselines import bounded_random_walk
 from .aux.interpolate import CubicHermiteMAkima as CubicHermiteInterp
+from .relaxation import t2_star_decay
 from types import SimpleNamespace
 from typing import List, Tuple
 
@@ -1620,8 +1621,40 @@ class PhysicsModel(nn.Module):
 
         # Define basis spectra coefficients
         if gen: print('>>>>> Preparing metabolite coefficients')
-        fid = self.modulate(fids=self.syn_basis_fids, 
-                            params=params[:,self.index['metabolites']])
+        amp = params[:,self.index['metabolites']]
+        if not self.V1_0:
+            # Handover section 10: T2*-based amplitude scaling -- signal
+            # lost between excitation and echo formation (TE) -- using
+            # the paper's exp(-TE/T2*) equation (src/relaxation.py),
+            # sourced from Table 1 of arXiv:2602.23463's supplement per
+            # the repo owner directly.
+            #
+            # This is a genuinely new, distinct effect from the existing
+            # per-line 'd'-driven lineshape decay applied later in
+            # lineshape_correction() (which shapes the FID's decay
+            # *during* the readout, t >= TE, and shows up as linewidth):
+            # the basis FIDs implicitly assume t=0 corresponds to the
+            # echo itself, with nothing previously scaling how much
+            # signal survived *getting there*. It reuses the same sampled
+            # 'd' (now correctly in 1/s units -- see the 'd'/T2 units
+            # bugfix in this file's history) as T2* = 1/d, rather than
+            # introducing a new sampled parameter, so no new registry
+            # column or config surface is needed for this piece.
+            #
+            # TE is read from self.TE (a registered buffer aliasing the
+            # basis set's own header['TE'], in ms) rather than any
+            # config-supplied TE value: PhysicsModel.__init__()'s own TE
+            # constructor argument is never stored as an instance
+            # attribute, so `self.TE` always resolves to the basis set's
+            # baked-in value -- confirmed directly to differ from
+            # config.TE for cows.json (30 vs 26). Using the basis set's
+            # own TE is the physically authoritative choice: it's the
+            # echo time the basis functions were actually simulated at.
+            TE_seconds = self.TE / 1000.0
+            d_per_line = params[:,self.index['d']]
+            amp = amp * t2_star_decay(TE=TE_seconds, T2_star=1.0 / d_per_line)
+        fid = self.modulate(fids=self.syn_basis_fids,
+                            params=amp)
         # print('modulate:: fid[...,0]: {}'.format(fid[0:7,0,0,0].squeeze()))
         # print('modulate params: ',params[0:7,self.index['metabolites'][0]])
         # fid.shape = torch.Size([bS, num_basisfcns, (num_moieties), 2, spec_length])
