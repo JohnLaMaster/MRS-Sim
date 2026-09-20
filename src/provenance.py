@@ -191,12 +191,30 @@ def collect_provenance(
         package_versions=_package_versions(),
         processing_history=list(processing_history or []),
         snr_definitions={
-            'target_snr': 'Sampled per-sample target SNR in dB, stored in params[:, index["snr"]].',
+            'target_snr': (
+                'Sampled per-sample target SNR (unitless ratio, per MRS '
+                'expert-consensus convention), stored in '
+                'params[:, index["snr"]] -- referenced against the peak '
+                'amplitude of pm.snr_metab (defaults to wrt_metab). Note: '
+                'generate_noise() internally applies a decibel-style log '
+                'conversion to this stored value before using it -- '
+                'flagged as an open question (docs/v2/progress_log.md, '
+                'handover section 7 audit) about whether that internal '
+                'conversion needs revisiting, not settled here.'
+            ),
             'realized_snr': (
                 'Computed post-noise-generation from the actual drawn noise '
-                'realization, not the target: power/spectral SNR referenced '
-                'against pm.snr_metab (defaults to wrt_metab). See '
-                'docs/v2/architecture_v1_audit.md section 4.'
+                'realization\'s measured std, not the target: power/spectral '
+                'SNR (unitless ratio) referenced against pm.snr_metab '
+                '(defaults to wrt_metab). Computed from each basis-function '
+                'line\'s own pre-baseline/pre-multicoil/pre-phase clean '
+                'signal, not from the final noisy/spectrum output. See '
+                'src/simulation_result.py\'s field comments and '
+                'docs/v2/progress_log.md (handover section 7 audit) for the '
+                'full definition, including why "power" (pSNR, a time-domain '
+                't=0 amplitude) and "spectral" (sSNR, a frequency-domain peak '
+                'height) are not the same kind of quantity despite sharing a '
+                'denominator.'
             ),
         },
         data_state={

@@ -1338,6 +1338,190 @@ name raises `ValueError` naming it.
 `theta_est`/`theta_fixed` signatures (7 tests, including the new
 fixed-vs-estimated behavior test). Full suite: 125/125 passing.
 
+## Milestone 18 — Section 7 audit: SNR target vs. realized (commit TBD)
+
+**Handover section addressed**: 7 (SNR: target vs. realized/measured).
+
+**Method**: delegated a read-only investigation (exact code quotes, no
+changes) across `physics_model.py`'s full SNR pipeline
+(sampling -> `generate_noise()` -> `pSNR`/`sSNR` -> `SimulationResult`),
+then verified its concrete claims directly before acting on any of them,
+per standing practice for this repo.
+
+**Findings**:
+- **No demonstrable bug** in the multi-transient mechanism the handover
+  doc asks to preserve: average target SNR (`params[:, index['snr']]`)
+  is divided by `sqrt(effective_num_coils)` then multiplied by each
+  transient's own independently-sampled `coil_snr` weight
+  (default range `[0, 2]`, mean 1, from `artifacts.mat`) --
+  `generate_noise()` lines ~1017-1042. This correctly reproduces the
+  standard "averaging N acquisitions improves SNR by sqrt(N)" relationship
+  (an individual transient must start out *noisier* than the combined
+  target). One inherited bug, now fixed: `multicoil()`'s own docstring
+  said the opposite ("much higher" per-transient linear SNR) --
+  corrected in place; this was a stale/wrong comment, not a code bug.
+- **Correction (repo owner, direct)**: SNR in MRS is a unitless ratio,
+  never decibels -- my first pass at this audit incorrectly documented
+  `target_snr` as being "in decibels" because `generate_noise()` itself
+  comments `lin_snr = 10**(param / 10) # convert from decibels to linear
+  scale` and an old inline docstring reports figures like "8.5278dB".
+  That documentation error is now fixed throughout (`SimulationResult`,
+  `provenance.py`). Left open, explicitly, as a separate question for the
+  repo owner rather than assumed either way: does `generate_noise()`'s
+  own internal decibel-style conversion of the stored (unitless) target
+  SNR need revisiting -- and separately, is `10**(x/10)` (the power-ratio
+  dB formula) even the right inverse if that conversion is kept, given
+  `lin_snr` is used directly against a peak *amplitude* reference
+  (`std_dev = max_val / lin_snr`), which would conventionally use the
+  amplitude-ratio dB formula `10**(x/20)` instead? Not resolved here.
+- **`realized_snr` (`pSNR`/`sSNR`) is a plain unitless ratio** (no log
+  conversion is applied to it anywhere -- confirmed by grep, no hits),
+  consistent with SNR being unitless. Whatever is decided about
+  `target_snr`'s internal representation above, comparing the two
+  directly currently requires undoing `generate_noise()`'s conversion on
+  the target side first; documented explicitly in `SimulationResult`'s
+  field comments and `provenance.py`'s `snr_definitions` rather than left
+  as an implicit trap.
+- **`realized_snr` is a genuine post-noise measurement, but not of the
+  final returned spectrum**: it's computed from the *actual drawn* noise
+  realization's measured std (`noise_vec.std()`), divided into each
+  basis-function line's own *pre*-baseline/pre-multicoil-combination/
+  pre-phase/pre-frequency-shift/pre-normalization clean amplitude -- not
+  from `SimulationResult.noisy`/`.spectrum` itself. So it is not a pure
+  relabeling of the target (it does reflect the actual noise draw), but
+  it also isn't "measured from the fully processed output" in the
+  strictest reading of the handover's phrasing. Documented explicitly
+  rather than changed -- recomputing it from the final output would be a
+  larger, riskier redesign than an audit-scope fix, and the handover
+  explicitly says to preserve behavior absent a demonstrable bug.
+- **`pSNR` ("power") and `sSNR` ("spectral") are not the same kind of
+  quantity** despite being presented as a pair: `sSNR` is a
+  frequency-domain peak height (real channel only, `Fourier_Transform(
+  fid).max(dim=-1)`); `pSNR` is the FID's `t=0` time-domain value (both
+  real and imaginary channels) -- by the Fourier DC-value identity this
+  is closer to a total-signal/area quantity than squared power, despite
+  the name. Both share the same denominator (measured noise std). Not
+  changed (no demonstrable bug -- these are just two different reference
+  quantities, both plausibly useful), but now documented explicitly so a
+  caller doesn't assume they're interchangeable views of the same signal.
+- Confirmed (already known from Milestones 8/10/11/12, re-verified rather
+  than re-litigated): the multicoil `pSNR`/`sSNR`/`generate_noise()` shape
+  crashes are fixed; no further multicoil SNR bug found in this pass.
+
+**Not changed**: the underlying SNR computations themselves (no
+demonstrable bug found beyond the docstring). `SimulationResult.provenance`
+still doesn't carry `snr_definitions` automatically (see the open
+"provenance not wired into SimulationResult" item, repo owner flagged
+this directly and it remains a separate, undecided piece of work).
+
+**Tests**: none new (documentation/comment-only changes plus one
+docstring fix); full suite re-run to confirm no regression, 130/130
+passing (includes Milestone 17's CRLB suite).
+
+## Milestone 19 — Section 11 audit: basis-set metadata + a real, unguarded double-application bug (commit TBD)
+
+**Handover section addressed**: 11 (basis-set metadata / double-application audit).
+
+**Method**: same as Milestone 18 -- delegated read-only investigation,
+then independently verified every concrete claim (guard absence via
+direct code read; the 4 shipped configs via direct grep; the dropped
+`header_info['lw']` value and `build_header_fields()`'s current field
+list via direct code read) before acting.
+
+**Finding 1 -- basis-set header schema, now measurably closer to the
+handover's requested list**: the only *active* header-writing code is
+`build_header_fields()` in `src/aux/process_basis_functions.py` (11
+fields: spectralwidth, carrier_frequency, Ns, t, centerFreq, B0, TE,
+pulse_sequence, vendor, basis_set_software, ppm). `notes`/`linewidth`/
+`dwelltime` present on some *legacy* .mat files (e.g.
+`PRESS_30_GE_2000.mat`) are hand-authored artifacts with **no writer
+anywhere in the current repo** -- confirmed by grepping the exact notes
+text and `.m`/`.py` sources; don't treat them as a reliable or extensible
+mechanism. Added, in `build_header_fields()`:
+- `dwelltime` (was already computed as `dt` to build `t`, just never
+  saved as its own field).
+- `pre_existing_linewidth_hz`: captures `header_info['lw']`, which
+  `load_marss_mat`/`load_fsl_mrs_basis_dir` **already compute** (MARSS's
+  documented 1.0 Hz default broadening; FSL-MRS's per-basis-set `Rx_LW`)
+  and previously discarded before it ever reached the saved header --
+  this is the single most actionable finding, since the information
+  already existed and was simply being thrown away. Loaders that don't
+  report it (Osprey, LCModel `.basis`/`.raw`) leave this at `0.0`,
+  documented as "not reported", not "confirmed zero".
+- `te_decay_applied` / `tr_relaxation_applied`: both hardcoded `False`,
+  confirmed structurally true for every loader in this file (`t` always
+  starts at 0 with no pre-echo offset; nothing references TR/T1
+  anywhere) -- makes explicit what `V1_0=False`'s T2* amplitude term and
+  the (dormant) `t1_cfg` feature already assume implicitly.
+Deliberately NOT added: `TR` and a software-version field -- neither has
+an actual source anywhere in this pipeline right now (`config` has no TR
+key), and unlike the JSON-based T1 database placeholders,
+`scipy.io.loadmat`/`convertdict()`'s type handling doesn't safely round-
+trip a Python `None` (verified: `np.asarray(None, dtype=np.float32)`
+raises `TypeError`, which `convertdict()`'s `except ValueError` would NOT
+catch) -- adding a field that would always be `None` risked a real crash
+for no information gain, so it's deferred rather than added unsafely.
+Verified all new fields round-trip cleanly through `convertdict()`
+(booleans convert to `0.0`/`1.0` tensors correctly, no exception).
+
+**Finding 2 -- CONFIRMED, unguarded double-application, live in 4 shipped
+configs**: `'g'` (per-line sampled Gaussian broadening, part of the Voigt
+lineshape) and `b0=True` (the explicit spatial B0 field-inhomogeneity
+simulator) model the **same physical effect** -- this repo's own prior
+milestone already established this from the paper MRS-Sim implements
+("[the Voigt lineshape's Gaussian component] is *also* meant to represent
+inhomogeneous broadening from intra-voxel field variation -- the same
+physical effect `B0_inhomogeneities()` explicitly simulates spatially,
+just modeled as a simple Gaussian statistical assumption instead" --
+Milestone 13's writeup, never acted on until now). Unlike the already-
+fixed `b0`/`V1_0` T2* double-counting (which raises a clear `ValueError`
+when both are active), **there is no equivalent guard for `b0` vs.
+`g`** -- confirmed by reading `forward()`'s only related check (`b0 and
+not self.V1_0`, nothing referencing `g`/`broadening`). Confirmed live
+(not just theoretical) by grepping every shipped config for
+`"b0": true` + a nonzero `"_g"` range with `broadening: true`:
+`src/config/templates/B0_samples_15.json`, `src/config/templates/
+B0_samples.json`, `src/config/predefined/B0_samples.json`, and
+`src/config/predefined/clean_PRESS_144_GE.json` all hit this combination
+today; `cows.json`/`kelley.json` set `b0: false` and are unaffected only
+incidentally (not because anything prevents it), and `forward()`'s own
+default is `b0=True`. **Not fixed in this milestone** -- this changes
+behavior for shipped configs (same significance as the `b0`/`V1_0` fix,
+which was confirmed with the repo owner directly before implementing);
+raised as an explicit question rather than assumed. See progress_log's
+open-items note below.
+
+**Finding 3 -- TE/TR/phase/frequency-shift: no double-application found,
+but for reasons that were implicit rather than recorded**: basis FIDs
+start at t=0=echo with nothing before it modeled (no loader applies TE-
+decay or TR/T1 saturation), matching what the already-existing `V1_0=
+False` T2* term and dormant `t1_cfg` feature already assume -- now made
+explicit via Finding 1's new flags instead of left as an unstated
+convention. No phase-correction or frequency-realignment code exists
+anywhere in the basis-set conversion pipeline (checked directly), so
+MRS-Sim's own `phi0`/`phi1`/frequency-shift sampling is additive-by-
+design against a presumed-canonical basis, not a double-application --
+but there is no metadata field confirming any given basis set actually
+*is* phase-canonical, which is a real (if currently unexercised) gap for
+unusual-provenance basis sets (e.g. LCModel `.basis`/`.raw` imports, which
+already have documented orientation quirks elsewhere in this file).
+
+**Housekeeping, not fixed**: `src/aux/io_writeospreyBASIS.py` and
+`io_writelcmBASIS.py` (and `convert_MRSS_to_MRS-Sim.py`, which imports the
+former) have unparseable syntax and are already commented out of
+`src/aux/__init__.py` -- confirmed dead code, not reachable, their
+hardcoded `linewidth=1` placeholders don't affect anything live.
+
+**Tests**: 5 new (`tests/test_process_basis_functions.py`) covering the
+three new `build_header_fields()` fields (present/absent-`lw` cases, the
+always-`False` decay flags) and a regression check that `t` still starts
+at 0. Full suite: 130/130 passing.
+
+**Open, undecided (repo owner's call)**: whether/how to guard the `g`/
+`b0` double-counting (Finding 2) -- a hard error (mirroring `b0`/`V1_0`),
+an authoritative-default choice, or something else. Flagged directly
+rather than assumed.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across

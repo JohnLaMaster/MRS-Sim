@@ -51,7 +51,41 @@ class SimulationResult:
     noise: Optional[torch.Tensor] = None
 
     parameters: Optional[SimulationParameters] = None
+
+    # Handover section 7 audit (docs/v2/progress_log.md): target_snr and
+    # realized_snr are not measured against the same signal, and
+    # generate_noise() internally applies a decibel-style log conversion
+    # to the sampled target_snr column even though SNR in MRS is a
+    # unitless ratio (per the repo owner's expert-consensus correction --
+    # see generate_noise()'s own comment/formula, flagged as an open
+    # question about whether that internal conversion itself needs
+    # revisiting, not settled here). Both facts are documented explicitly
+    # here instead of left as an implicit trap for anyone comparing the
+    # two directly.
+    #
+    # `target_snr` ([batch]): the sampled target SNR
+    # (params[:, index['snr']]) used to derive the noise standard
+    # deviation in generate_noise() -- referenced against the peak
+    # amplitude of the metabolite line(s) named in `pm.snr_metab`
+    # (defaults to `pm.wrt_metab`). SNR itself is unitless (a plain
+    # ratio); see the note above re: generate_noise()'s internal handling.
     target_snr: Optional[torch.Tensor] = None
+
+    # `realized_snr` (dict with 'power'/'spectral' keys, each
+    # [batch, num_bF, channels, 1], unitless ratio): computed from the
+    # *actual drawn* noise realization's measured standard deviation
+    # (noise_vec.std()), divided into each individual basis-function
+    # line's own clean-signal amplitude -- NOT measured from this
+    # result's final `noisy`/`spectrum` output (that would additionally
+    # reflect baseline/residual-water/multicoil-combination/phase/
+    # frequency-shift/eddy-current/normalization, none of which feed into
+    # this computation). 'spectral' is a frequency-domain peak height
+    # (real channel only); 'power' is the FID's t=0 time-domain value
+    # (real and imaginary channels both kept) -- despite the name, this
+    # is closer to a total-signal/area quantity than squared power. The
+    # generate_noise() docstring documents the original author's own
+    # observation that this target/realized correspondence is close but
+    # has real sample-to-sample variance, not floating-point noise.
     realized_snr: Optional[Dict[str, Any]] = None
 
     # Handover section 6: CRLB/Fisher information. Disabled by default

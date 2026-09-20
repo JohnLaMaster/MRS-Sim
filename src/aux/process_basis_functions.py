@@ -651,7 +651,45 @@ def build_header_fields(header, header_info: dict, config: dict,
     header['vendor']             = config['vendor']
     header['basis_set_software'] = config['sim_software'] if config.get('sim_software') else 'unspecified'
     header['ppm']                = ppm
-    
+
+    # v2.0 (handover section 11 audit): dwell time was already computed
+    # above (as `dt`) to build `t`, but never stored as its own field --
+    # added here so a basis set doesn't require re-deriving it from
+    # spectralwidth (which PhysicsModel/NIfTI export both already have to
+    # do defensively elsewhere for basis sets missing it, e.g.
+    # src/NIfTIMRS/mat2niftimrs.py).
+    header['dwelltime'] = dt
+
+    # v2.0 (handover section 11 audit): some loaders already KNOW the
+    # source spin simulator applied a fixed line-broadening/apodization
+    # before exporting the FID (e.g. load_marss_mat's documented "default
+    # basis functions are broadened by 1.0 Hz in MARSS", or
+    # load_fsl_mrs_basis_dir's per-basis-set Rx_LW), but that value
+    # (header_info['lw']) was computed and then silently discarded --
+    # never reaching the saved header. Recorded here instead of
+    # fabricated: loaders that don't report it (Osprey, LCModel .basis/
+    # .raw) leave this at 0.0, which must be read as "not reported by
+    # this loader", not "confirmed zero broadening" -- see
+    # docs/v2/progress_log.md for the full audit and which loaders do
+    # report a real value.
+    header['pre_existing_linewidth_hz'] = float(header_info.get('lw', 0.0))
+
+    # v2.0 (handover section 11 audit): "whether TE/TR effects are
+    # already represented" and "whether relaxation has already been
+    # applied", made explicit per the handover doc's request rather than
+    # left as an implicit convention. Confirmed by this audit to be
+    # uniformly False across every loader this function serves: `t` is
+    # always built starting at 0 with no pre-echo offset (line above),
+    # and none of the loaders in this file reference TR, T1, or any
+    # excitation-to-echo decay -- so a basis FID's t=0 point is always
+    # the echo itself, with nothing before it (decay up to TE, or any
+    # TR-dependent T1 saturation) represented in the exported FID. This
+    # is what PhysicsModel's V1_0=False T2* amplitude term and the
+    # (currently dormant) t1_cfg feature exist to model instead -- see
+    # physics_model.py and docs/v2/progress_log.md.
+    header['te_decay_applied'] = False
+    header['tr_relaxation_applied'] = False
+
     return header
 
 

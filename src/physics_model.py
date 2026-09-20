@@ -1359,12 +1359,18 @@ class PhysicsModel(nn.Module):
                   multi_coil: torch.Tensor,
                  ) -> torch.Tensor:
         '''
-        This function creates transients according to the number of specified 
+        This function creates transients according to the number of specified
         coils. Noise and scaling are done separately.
-        The SNR dB value provided is the SNR of the final, coil combined 
-        spectrum. Therefore, each of the transients will have a much higher 
-        linear SNR that is dependent upon the expected final SNR and the number 
-        of transients being simulated.
+        The SNR value provided is the (unitless-ratio) SNR of the final,
+        coil-combined spectrum. Therefore, each of the transients will
+        have a much LOWER linear SNR than the final combined spectrum --
+        averaging N transients improves SNR by sqrt(N) (the classic
+        multi-average result), so an individual transient must start out
+        noisier by that same factor for the combined result to reach the
+        requested target. See generate_noise()'s `lin_snr /= s**0.5`
+        (v2.0 handover section 7 audit; this docstring previously said
+        "higher", the opposite of what the code correctly does --
+        docs/v2/progress_log.md).
         '''
         # assert(fid.ndim==3) # Using difference editing would make it 
         #   [bS, ON/OFF, channels, length] 
