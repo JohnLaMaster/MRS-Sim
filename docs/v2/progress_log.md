@@ -1912,6 +1912,54 @@ block key that matches a real `self.index` entry).
 warn -- confirmed via `warnings.simplefilter("error")` -- when there is
 none). Full suite: 144/144 passing.
 
+## Milestone 25 — section 13 testing, started: baseline generation (commit TBD)
+
+**Handover section addressed**: 13 (testing), started -- this is a large,
+open-ended checklist (baseline generation/spline fitting, residual-water
+generation, noise generation, target vs. realized SNR, multi-transient
+SNR, relaxation, parameter registry, parameter replay, paired basis-set
+simulations, nuisance removal, CRLB/Jacobian/FIM, complex observation
+handling, zero-filling/CRLB exclusion, NIfTI-MRS, provenance, batch/n-
+dimensional operation, enabling/disabling individual components).
+Cross-referencing against the 14 existing test files: relaxation,
+parameter registry, nuisance removal, CRLB, NIfTI-MRS, provenance, and
+(as of this session) noise generation and target-vs-realized SNR (the
+sqrt(N) fix's regression tests) are already covered. `bounded_random_walk`
+(baseline generation itself, as opposed to the spline fit already covered
+in `test_splines.py`) had no test coverage at all -- addressed first as
+the clearest gap.
+
+**`tests/test_baselines.py`** (new, 7 tests, pure function, no basis set
+needed): output shape, staying within `[lower_bound, upper_bound]`,
+starting/ending at the requested values, seeded reproducibility, distinct
+seeds giving distinct walks, a zero-`std` sanity check (degenerates to a
+straight trend line), and the existing bounds assertion.
+
+**Found while writing these tests, not fixed (out of scope for a testing
+pass) -- a real, separate broadcasting bug**: `bounded_random_walk` (via
+`batch_linspace`, `src/aux/aux.py`) requires `start`/`end` to be at least
+3-D (`(batch, 1, 1)`, matching every real call site in this codebase --
+e.g. `sample_resWater()`'s `torch.zeros(N, 1, 1)`). Passing a 2-D
+`(batch, 1)` `start`/`end` does not raise -- it silently produces a
+cross-broadcast `(batch, batch, length)` result instead of the expected
+`(batch, 1, length)` (confirmed directly: `start=torch.zeros(4,1)` gives
+a `(4, 4, 16)` output for `length=16`, not `(4, 1, 16)`). Not live in the
+current pipeline (nothing calls this with a 2-D `start`/`end`), so not
+fixed here, but recorded since it's exactly the kind of dimension-
+handling gap section 13 asks tests to surface.
+
+**Tests**: 7 new (`tests/test_baselines.py`). Full suite: 151/151 passing.
+
+**Not yet done** (section 13 checklist, remaining): residual-water
+generation, paired basis-set (difference-editing) simulations, complex
+observation handling, zero-filling/CRLB-mask exclusion, batch/n-
+dimensional operation, and a direct committed regression test for
+"enabling/disabling individual components" (Milestone 23's
+`fit_baseline_spline`/`compute_crlb` gating) and for target-vs-realized
+SNR at the full `forward()` level (currently verified manually against a
+real basis set per Milestone 22, not as a committed test, since
+`_compile_result()` needs a real `PhysicsModel`).
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across
