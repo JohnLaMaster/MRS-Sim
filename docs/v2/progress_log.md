@@ -925,6 +925,31 @@ real basis set; both need a real `PhysicsModel` to exercise meaningfully,
 consistent with the established pattern for basis-set-dependent changes).
 Full suite: 100/100 passing throughout.
 
+**Follow-up guard added same milestone (commit `fda60f3`)**: the repo
+owner flagged that their existing `b0=True` path
+(`B0_inhomogeneities()`/`add_inhomogeneities()`) already explicitly
+simulates spatial B0 field variation across the voxel and multiplies the
+FID by the resulting intra-voxel dephasing kernel -- confirmed this is
+exactly the physical mechanism that converts intrinsic T2 into apparent
+T2* (inhomogeneous broadening from field variation), i.e. the same effect
+the new `V1_0=False` T2* amplitude term also models, just as a fixed
+scalar instead of an explicit spatial simulation. `forward()` now raises
+a clear `ValueError` if `b0=True` and `V1_0=False` are both requested,
+rather than silently double-counting the T2->T2* conversion. Verified
+against `cows.json`: the error fires for the conflicting combination;
+`b0=False`+`V1_0=False` and `b0=True`+`V1_0=True` (default) both continue
+to work unchanged.
+
+**Related, NOT addressed here (flagged for the section 11 audit)**: per
+arXiv:2602.23463's own description, the Voigt lineshape's Gaussian
+component ('g' in MRS-Sim) is *also* meant to represent inhomogeneous
+broadening from intra-voxel field variation -- the same physical effect
+`B0_inhomogeneities()` explicitly simulates spatially, just modeled as a
+simple Gaussian statistical assumption instead. Whether sampling 'g' and
+enabling `b0=True` together double-counts this in the same way `b0` and
+the new T2* term do was not investigated this session -- noted here so it
+isn't lost.
+
 **Remaining/follow-up (section 10)**:
 - T1/T1* wiring is not done: needs genuinely new config surface (TR,
   flip angle) and T1 database values that don't exist anywhere yet (no
