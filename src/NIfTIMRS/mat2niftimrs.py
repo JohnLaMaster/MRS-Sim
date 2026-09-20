@@ -48,6 +48,23 @@ class Mat2NIfTI_MRS():
             specDataCmplx = data['spectra']
             header = data['header']
 
+        # BUGFIX (v2.0): loadmat_as_dict() calls scipy.io.loadmat(...,
+        # squeeze_me=True), which silently removes the noisy/clean axis
+        # entirely whenever it has size 1 -- i.e. whenever the dataset was
+        # generated with noise=False. Confirmed directly: a dataset's
+        # saved spectra shape (batch, noisy/clean, channels, length), e.g.
+        # (2, 1, 2, 2048), loads back as (2, 2, 2048) in that case. Every
+        # index below assumes axis 1 is noisy/clean, so this silently
+        # shifted every subsequent axis (making axis 1 the channels axis
+        # instead), corrupting the label-based branch selection and then
+        # crashing the real/imaginary combining step further down (that
+        # step's own 0/1 indexing is correct -- it targets the channels
+        # axis on purpose; it was just operating on a misaligned array).
+        # Restore the squeezed-away axis explicitly rather than changing
+        # loadmat_as_dict()'s shared default behavior.
+        if specDataCmplx.ndim == 3:
+            specDataCmplx = np.expand_dims(specDataCmplx, axis=1)
+
         if isinstance(label,type(None)) and specDataCmplx.shape[1]>>1:
             specDataCmplx = np.expand_dims(specDataCmplx[:,0,...], axis=1)
         elif isinstance(label,str) and specDataCmplx.shape[1]>=2:
@@ -95,7 +112,17 @@ class Mat2NIfTI_MRS():
 
         # Write new header
         pixDim = newobj.header['pixdim']
-        pixDim[4] = header['dwelltime']
+        # BUGFIX (v2.0): header['dwelltime'] does not exist anywhere in a
+        # simulated dataset's saved header -- PhysicsModel.header (loaded
+        # via aux.convertdict()) only ever has spectralwidth,
+        # carrier_frequency, Ns, t, centerFreq, B0, TE,
+        # basis_set_software, ppm (confirmed directly). This was an
+        # unconditional KeyError crash for every simulated dataset, with
+        # or without noise. dwelltime = 1/spectralwidth (the standard
+        # relationship, also asserted directly in
+        # aux/validate_basis_sets.py's own basis-set validation).
+        dwelltime = header['dwelltime'] if 'dwelltime' in header else 1.0 / header['spectralwidth']
+        pixDim[4] = dwelltime
         newobj.header['pixdim'] = pixDim
 
         # Set q_form >0
@@ -121,7 +148,16 @@ class Mat2NIfTI_MRS():
         nucleus_str = '1H'
 
         echo_time_s = header['TE'] / 1000
-        repetition_time_s = 'NA'
+        # BUGFIX (v2.0): the NIfTI-MRS spec (wtclarke/mrs_nifti_standard,
+        # confirmed directly) requires RepetitionTime to be a *number*
+        # (seconds) when present; it is optional and the spec explicitly
+        # permits JSON `null` for an unknown value. The string 'NA' used
+        # here was a genuine type violation for any strict NIfTI-MRS
+        # consumer. TR is not tracked anywhere in MRS-Sim (see
+        # docs/v2/architecture_v1_audit.md / progress_log.md) -- None
+        # (-> JSON null) is the honest, spec-compliant representation of
+        # "genuinely unknown", not a fabricated numeric value.
+        repetition_time_s = None
 
         DeviceSerialNumber = 'NA'
         Manufacturer = 'MRS-Sim'
