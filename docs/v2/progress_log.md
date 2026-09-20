@@ -1280,6 +1280,64 @@ static methods -- no real basis set needed) and 6 new in
 paths, plus a regression test pinning the real database's T1-placeholder
 shape for every metabolite). Full suite: 123/123 passing.
 
+## Milestone 17 — CRLB: configurable include/exclude parameters + first-order phase (commit TBD)
+
+**Handover section addressed**: 6 (CRLB/FIM), follow-up.
+
+**Context**: repo owner pointed out that CRLB should let the caller
+specify which of the standard model-fitting parameters are actually
+estimated (their example: zero- and first-order phase, both commonly
+either estimated jointly or fixed in real MRS fitting software) rather
+than hardcoding a fixed set -- "it's better to leave it up to the user."
+First-order phase (`phi1`) wasn't modeled by `src/crlb.py` at all before
+this, unlike `phi0`, so this also required adding it to the CRLB forward
+model.
+
+**Semantics chosen**: excluding a parameter family does not turn its
+physical effect off -- it fixes it at its actual sampled/fitted value
+instead (the standard "nuisance parameter known exactly" CRLB variant,
+matching how real fitting software lets phi1 be estimated jointly or held
+fixed). Verified directly (`tests/test_crlb.py::
+test_fixed_phi0_still_affects_signal_but_not_differentiated`): a fixed,
+nonzero phi0 still changes the observed signal, but the Jacobian/FIM/CRLB
+only ever has a row/column for parameters actually being estimated.
+
+**`_crlb_signal_model`** now takes `(theta_est, theta_fixed, ...,
+layout_est, layout_fixed)` instead of one `theta`/`layout` -- every
+parameter family in the new `ALL_CRLB_PARAMS = ('amp', 'd', 'g', 'fshift',
+'phi0', 'phi1', 'beta')` is always physically applied, sourced from
+whichever of the two theta tensors its `layout_*` entry says. `jacrev(...,
+argnums=0)` then only differentiates `theta_est`.  `compute_crlb()` gained
+`include_params`/`exclude_params` (default `DEFAULT_CRLB_PARAMS` = the
+same 6 families as before, `phi1` excluded, so default behavior/output
+shape is unchanged); both are validated (`ValueError` for an unknown name
+or an empty resulting include set) and normalized to `ALL_CRLB_PARAMS`'s
+canonical order regardless of input order. `PhysicsModel.forward()`/
+`_compile_result()` gained matching `crlb_include_params`/
+`crlb_exclude_params` passthrough parameters.
+
+**First-order phase added to the CRLB model**: applied directly to the
+already-FFT'd spectrum (`complex_exp(spectrum, -phi1_ref * phi1_rad)`)
+rather than round-tripping through an extra IFFT/FFT the way
+`PhysicsModel.first_order_phase()` does (needed there only because it's
+called on, and must return, a time-domain fid) -- verified numerically
+equivalent to floating-point precision (max abs diff 4.9e-7) against
+`PhysicsModel.first_order_phase()`'s actual formula on a synthetic signal,
+not just assumed from reading the code.
+
+**Verified end to end** against `cows.json`'s real basis set: default
+call still produces exactly 139 CRLB parameters (unchanged from Milestone
+6's documented count -- confirms this refactor didn't silently change
+default behavior); `crlb_exclude_params=['phi0']` gives 138 (phi0's label
+absent); `crlb_include_params=ALL_CRLB_PARAMS` (adding phi1) gives 140
+with `'phi1'` present; excluding every family raises `ValueError` instead
+of silently returning an empty/degenerate result; an unknown parameter
+name raises `ValueError` naming it.
+
+**Tests**: `tests/test_crlb.py` rewritten for the new
+`theta_est`/`theta_fixed` signatures (7 tests, including the new
+fixed-vs-estimated behavior test). Full suite: 125/125 passing.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across

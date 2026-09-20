@@ -1671,6 +1671,8 @@ class PhysicsModel(nn.Module):
                 return_components: bool=False,
                 compute_crlb: bool=False,
                 return_fim: bool=False,
+                crlb_include_params: list=None,
+                crlb_exclude_params: list=None,
                ) -> torch.Tensor:
         
         if params.ndim==1: params = params.unsqueeze(0) # Allows batchSize = 1
@@ -2081,6 +2083,8 @@ class PhysicsModel(nn.Module):
                 params=params, denom=denom, quantities=quantities, SNR=SNR,
                 noise=noise, noise_vec=noise_vec if noise else None, d=d,
                 compute_crlb_flag=compute_crlb, return_fim=return_fim,
+                crlb_include_params=crlb_include_params,
+                crlb_exclude_params=crlb_exclude_params,
             )
         return self.compile_outputs(specSummed, spectral_fit, offsets, params,
                                     denom, quantities, SNR=SNR)
@@ -2135,6 +2139,8 @@ class PhysicsModel(nn.Module):
                         d: int,
                         compute_crlb_flag: bool=False,
                         return_fim: bool=False,
+                        crlb_include_params: list=None,
+                        crlb_exclude_params: list=None,
                        ) -> 'SimulationResult':
         '''
         Build the v2.0 structured SimulationResult (handover section 3).
@@ -2248,6 +2254,7 @@ class PhysicsModel(nn.Module):
 
             crlb_result = _compute_crlb(
                 self, params, beta_for_crlb, crlb_basis, sigma=sigma, return_fim=return_fim,
+                include_params=crlb_include_params, exclude_params=crlb_exclude_params,
             )
             crlb = crlb_result.crlb
             fim = crlb_result.fim

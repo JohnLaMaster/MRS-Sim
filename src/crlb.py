@@ -8,16 +8,31 @@ this on its own; see `_crlb_forward_model` usage in `compute_crlb()`).
 Scope of the CRLB forward model (documented explicitly, since this is a
 deliberately-limited first implementation, not the full simulator):
 included are per-line complex amplitude, Voigt lineshape (Lorentzian `d` +
-Gaussian `g`), per-line frequency shift, global zero-order phase, and the
-baseline's spline coefficients as nuisance parameters. NOT included: B0
-field inhomogeneity, eddy currents, multi-coil combination, first-order
-phase, residual water, and resampling/cropping/zero-filling (the model
-assumes the acquired grid needs no resampling, matching a config like
-`cows.json`'s `resample: False`). These follow the classic MRS CRLB
-parameterization (e.g. Cavassila et al. 2001) rather than the full
-stochastic generative pipeline (bounded-random-walk baseline generation,
-B0 field maps, etc. are not part of "the signal model" in the CRLB sense
-even in the classic literature).
+Gaussian `g`), per-line frequency shift, global zero- and first-order
+phase, and the baseline's spline coefficients as nuisance parameters. NOT
+included: B0 field inhomogeneity, eddy currents, multi-coil combination,
+the global frequency shift, residual water, and resampling/cropping/
+zero-filling (the model assumes the acquired grid needs no resampling,
+matching a config like `cows.json`'s `resample: False`). These follow the
+classic MRS CRLB parameterization (e.g. Cavassila et al. 2001) rather than
+the full stochastic generative pipeline (bounded-random-walk baseline
+generation, B0 field maps, etc. are not part of "the signal model" in the
+CRLB sense even in the classic literature).
+
+**Which parameters are estimated vs. fixed** (repo-owner request,
+docs/v2/progress_log.md): every parameter family above is always applied
+in the forward model at its actual sampled/fitted value -- excluding a
+family from the CRLB does not turn its physical effect off, it fixes it at
+that value instead (the standard "nuisance parameter known exactly"
+CRLB variant), matching how MRS fitting software commonly lets a user
+decide whether e.g. first-order phase is estimated jointly with everything
+else or held fixed. `compute_crlb(..., include_params=...,
+exclude_params=...)` controls this -- see `ALL_CRLB_PARAMS`/
+`DEFAULT_CRLB_PARAMS` below. Only the *included* families contribute rows/
+columns to the returned `crlb`/`fim`/`labels`; excluded ones still shape
+`fim` through the model's nonlinearity (a fixed nuisance value still
+affects how identifiable the estimated parameters are), they just aren't
+estimated themselves.
 
 To keep the forward model `torch.func.vmap`-safe (PhysicsModel's own
 `lineshape_correction`/`frequency_shift`/etc. branch on tensor rank in ways
@@ -54,7 +69,16 @@ from torch.func import jacrev, vmap
 from .aux import Fourier_Transform, complex_exp
 from .splines import evaluate_spline
 
-__all__ = ['CRLBResult', 'compute_crlb']
+__all__ = ['CRLBResult', 'compute_crlb', 'ALL_CRLB_PARAMS', 'DEFAULT_CRLB_PARAMS']
+
+# Canonical order -- also the order labels/columns appear in whenever more
+# than one family is included, regardless of the order the caller passed.
+ALL_CRLB_PARAMS = ('amp', 'd', 'g', 'fshift', 'phi0', 'phi1', 'beta')
+
+# Matches this module's pre-existing behavior exactly (before
+# include_params/exclude_params existed): phi1 was never modeled at all,
+# so it stays opt-in rather than changing default output shape/labels.
+DEFAULT_CRLB_PARAMS = ('amp', 'd', 'g', 'fshift', 'phi0', 'beta')
 
 
 @dataclass
@@ -72,28 +96,47 @@ def _voigt_decay(d: torch.Tensor, g: torch.Tensor, t: torch.Tensor) -> torch.Ten
 
 
 def _crlb_signal_model(
-    theta: torch.Tensor,
+    theta_est: torch.Tensor,
+    theta_fixed: torch.Tensor,
     basis_fids: torch.Tensor,
     t: torch.Tensor,
     carrier_frequency: torch.Tensor,
     spline_basis: torch.Tensor,
-    layout: dict,
+    phi1_ref: torch.Tensor,
+    layout_est: dict,
+    layout_fixed: dict,
 ) -> torch.Tensor:
     """
     Single-sample (no batch dim), differentiable, real-valued observation
-    model: `theta -> [real(spectrum); imag(spectrum)]`. Intended to be
-    wrapped with `torch.func.vmap` for batched use -- see `compute_crlb`.
+    model: `(theta_est, theta_fixed) -> [real(spectrum); imag(spectrum)]`.
+    Intended to be wrapped with `torch.func.vmap(torch.func.jacrev(...,
+    argnums=0))` for batched use -- see `compute_crlb`.
+
+    Every parameter family in `ALL_CRLB_PARAMS` is always physically
+    applied; `layout_est`/`layout_fixed` (together covering exactly
+    `ALL_CRLB_PARAMS`, see `compute_crlb`) just say whether a given
+    family's value comes from `theta_est` (differentiated -> contributes
+    to the CRLB/FIM) or `theta_fixed` (held constant at its actual sampled/
+    fitted value -- still shapes the model's nonlinearity, just isn't
+    itself estimated). See the module docstring's "which parameters are
+    estimated vs. fixed" section.
 
     `basis_fids`: [n_lines, 2, L] (PhysicsModel.syn_basis_fids with its
-    leading batch=1 dimension squeezed out). `t`: [L]. `spline_basis`:
-    [L, n_basis].
+    leading batch=1 dimension squeezed out). `t`, `phi1_ref`: [L].
+    `spline_basis`: [L, n_basis].
     """
-    amp = theta[layout['amp']]
-    d = theta[layout['d']]
-    g = theta[layout['g']]
-    fshift_ppm = theta[layout['fshift']]
-    phi0 = theta[layout['phi0']]
-    beta = theta[layout['beta']].view(2, -1)
+    def _get(name: str) -> torch.Tensor:
+        if name in layout_est:
+            return theta_est[layout_est[name]]
+        return theta_fixed[layout_fixed[name]]
+
+    amp = _get('amp')
+    d = _get('d')
+    g = _get('g')
+    fshift_ppm = _get('fshift')
+    phi0 = _get('phi0')
+    phi1 = _get('phi1')
+    beta = _get('beta').view(2, -1)
 
     # modulate: amp * basis_fids (PhysicsModel.modulate's formula)
     fid = amp.unsqueeze(-1).unsqueeze(-1) * basis_fids  # [n_lines, 2, L]
@@ -119,6 +162,19 @@ def _crlb_signal_model(
     # Fourier_Transform requires ndim>=3; add and drop a dummy leading dim.
     spectrum = Fourier_Transform(fid_sum.unsqueeze(0)).squeeze(0)  # [2, L]
 
+    # first_order_phase: PhysicsModel.first_order_phase() applies
+    # complex_exp(FFT(fid), -phi1_ref*phi1_rad) then inverse-FFTs back to
+    # time domain (so it can be called on, and return, a time-domain fid).
+    # Nothing this model includes happens between that internal FFT and
+    # the Fourier_Transform call directly above (the real pipeline's only
+    # intervening step, the global frequency_shift, isn't modeled here
+    # either -- see the module docstring's scope note), so applying the
+    # same ramp directly to `spectrum` is exactly equivalent without the
+    # redundant IFFT/FFT round trip.
+    phi1_rad = phi1 * torch.pi / 180.0
+    phase_ramp = (-1 * phi1_ref * phi1_rad).view(1, 1, -1)  # [1, 1, L]
+    spectrum = complex_exp(spectrum.unsqueeze(0), phase_ramp).squeeze(0)  # [2, L]
+
     # baseline spline nuisance term, added directly in the frequency domain
     # (matching where baseline is actually added relative to the final
     # spectrum -- see docs/v2/architecture_v1_audit.md section 3)
@@ -140,13 +196,21 @@ def _crlb_signal_model(
     return torch.cat([observed[0], observed[1]], dim=0)  # [2L]
 
 
-def _build_layout(n_lines: int, n_basis: int) -> dict:
+def _build_layout(param_names, n_lines: int, n_basis: int) -> tuple:
+    """
+    Assign each name in `param_names` (an ordered subset/permutation of
+    `ALL_CRLB_PARAMS`) a contiguous column slice, in the given order.
+    Returns `(layout, n_params)`; `layout` is empty (and `n_params` is 0)
+    for an empty `param_names`, which is valid (`compute_crlb` uses this
+    for the "fixed" side when nothing is excluded).
+    """
+    sizes = {'amp': n_lines, 'd': n_lines, 'g': n_lines, 'fshift': n_lines,
+             'phi0': 1, 'phi1': 1, 'beta': 2 * n_basis}
     i = 0
     layout = {}
-    for name, size in [('amp', n_lines), ('d', n_lines), ('g', n_lines),
-                        ('fshift', n_lines), ('phi0', 1), ('beta', 2 * n_basis)]:
-        layout[name] = slice(i, i + size)
-        i += size
+    for name in param_names:
+        layout[name] = slice(i, i + sizes[name])
+        i += sizes[name]
     return layout, i
 
 
@@ -159,6 +223,8 @@ def compute_crlb(
     mask: Optional[torch.Tensor] = None,
     return_fim: bool = False,
     rcond: float = 1e-10,
+    include_params: Optional[List[str]] = None,
+    exclude_params: Optional[List[str]] = None,
 ) -> CRLBResult:
     """
     Compute the Cramer-Rao Lower Bound for one batch of simulated samples.
@@ -206,33 +272,75 @@ def compute_crlb(
         precision" / poorly identified, not as literal negative variances.
         Inspect `torch.linalg.eigvalsh(fim)` / `torch.linalg.cond(fim)` if
         you need to diagnose which samples/parameters are affected.
+    include_params :
+        Which parameter families (from `ALL_CRLB_PARAMS`:
+        `'amp'`, `'d'`, `'g'`, `'fshift'`, `'phi0'`, `'phi1'`, `'beta'`)
+        to *estimate* -- i.e. differentiate w.r.t., so they get a row/
+        column in `crlb`/`fim`/`labels`. Defaults to `DEFAULT_CRLB_PARAMS`
+        (everything except `'phi1'`, matching this module's behavior
+        before this option existed). Order in the input is irrelevant --
+        output order always follows `ALL_CRLB_PARAMS`.
+    exclude_params :
+        Families to drop from whatever `include_params` (or the default)
+        would otherwise estimate -- e.g. `exclude_params=['phi0']` to fix
+        zero-order phase at its sampled value instead of estimating it.
+        Families not being estimated are still applied in the forward
+        model at their actual value (see the module docstring's "which
+        parameters are estimated vs. fixed" section) -- they are never
+        simply left out of the signal.
 
     Returns
     -------
     CRLBResult
     """
+    include = list(include_params) if include_params is not None else list(DEFAULT_CRLB_PARAMS)
+    if exclude_params:
+        include = [p for p in include if p not in exclude_params]
+    unknown = sorted(set(include) - set(ALL_CRLB_PARAMS))
+    if unknown:
+        raise ValueError(
+            f"Unknown CRLB parameter name(s) {unknown}; valid names are {ALL_CRLB_PARAMS}.")
+    if not include:
+        raise ValueError("At least one parameter family must be included in the CRLB "
+                          "(include_params/exclude_params left nothing to estimate).")
+    # Canonical order regardless of what order the caller listed things in.
+    include = [p for p in ALL_CRLB_PARAMS if p in include]
+    exclude = [p for p in ALL_CRLB_PARAMS if p not in include]
+
     n_lines = len(pm.index['d'])
     n_basis = spline_basis.shape[-1]
-    layout, n_params = _build_layout(n_lines, n_basis)
+    layout_est, n_est = _build_layout(include, n_lines, n_basis)
+    layout_fixed, n_fixed = _build_layout(exclude, n_lines, n_basis)
 
     amp = params[:, pm.index['metabolites']]
     d = params[:, pm.index['d']]
     g = params[:, pm.index['g']]
     fshift = params[:, pm.index['f_shifts']]
     phi0 = params[:, pm.index['phi0']].unsqueeze(-1) if params[:, pm.index['phi0']].ndim == 1 else params[:, pm.index['phi0']]
+    phi1 = params[:, pm.index['phi1']].unsqueeze(-1) if params[:, pm.index['phi1']].ndim == 1 else params[:, pm.index['phi1']]
     beta = spline_coefficients.reshape(spline_coefficients.shape[0], -1)
 
-    theta = torch.cat([amp, d, g, fshift, phi0, beta], dim=-1)  # [batch, n_params]
+    values = {'amp': amp, 'd': d, 'g': g, 'fshift': fshift,
+              'phi0': phi0, 'phi1': phi1, 'beta': beta}
+    batch = amp.shape[0]
+
+    theta_est = (torch.cat([values[name] for name in include], dim=-1)
+                 if include else amp.new_zeros(batch, 0))
+    theta_fixed = (torch.cat([values[name] for name in exclude], dim=-1)
+                   if exclude else amp.new_zeros(batch, 0))
 
     basis_fids = pm.syn_basis_fids.squeeze(0)  # [n_lines, 2, L]
     t = pm.t.squeeze()
     carrier_frequency = pm.carrier_frequency
+    phi1_ref = pm.phi1_ref.squeeze()
 
-    def model_fn(theta_i):
-        return _crlb_signal_model(theta_i, basis_fids, t, carrier_frequency, spline_basis, layout)
+    def model_fn(theta_est_i, theta_fixed_i):
+        return _crlb_signal_model(theta_est_i, theta_fixed_i, basis_fids, t,
+                                  carrier_frequency, spline_basis, phi1_ref,
+                                  layout_est, layout_fixed)
 
-    jacobian_fn = vmap(jacrev(model_fn))
-    J = jacobian_fn(theta)  # [batch, 2L, n_params]
+    jacobian_fn = vmap(jacrev(model_fn, argnums=0), in_dims=(0, 0))
+    J = jacobian_fn(theta_est, theta_fixed)  # [batch, 2L, n_est]
 
     if mask is not None:
         J = J[:, mask, :]
@@ -240,7 +348,7 @@ def compute_crlb(
     sigma = sigma.reshape(sigma.shape[0], *([1] * (J.ndim - 1)))
     weighted_J = J / sigma  # equivalent to Sigma^{-1/2} @ J for Sigma = sigma^2 * I
 
-    fim = torch.matmul(weighted_J.transpose(-1, -2), weighted_J)  # [batch, n_params, n_params]
+    fim = torch.matmul(weighted_J.transpose(-1, -2), weighted_J)  # [batch, n_est, n_est]
 
     fim_pinv = torch.linalg.pinv(fim, rcond=rcond, hermitian=True)
     crlb = torch.diagonal(fim_pinv, dim1=-2, dim2=-1)
@@ -252,14 +360,16 @@ def compute_crlb(
     # generic "line{i}" placeholder.
     from .parameters import ParameterRegistry
     line_names = ParameterRegistry.from_physics_model(pm).metabolite_names
-    labels = (
-        [f'{name}.amplitude' for name in line_names]
-        + [f'{name}.d' for name in line_names]
-        + [f'{name}.g' for name in line_names]
-        + [f'{name}.frequency_shift' for name in line_names]
-        + ['phi0']
-        + [f'baseline_spline.real[{i}]' for i in range(n_basis)]
-        + [f'baseline_spline.imag[{i}]' for i in range(n_basis)]
-    )
+    label_map = {
+        'amp': [f'{name}.amplitude' for name in line_names],
+        'd': [f'{name}.d' for name in line_names],
+        'g': [f'{name}.g' for name in line_names],
+        'fshift': [f'{name}.frequency_shift' for name in line_names],
+        'phi0': ['phi0'],
+        'phi1': ['phi1'],
+        'beta': ([f'baseline_spline.real[{i}]' for i in range(n_basis)]
+                 + [f'baseline_spline.imag[{i}]' for i in range(n_basis)]),
+    }
+    labels = [label for name in include for label in label_map[name]]
 
     return CRLBResult(crlb=crlb, fim=fim if return_fim else None, labels=labels)
