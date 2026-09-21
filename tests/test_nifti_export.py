@@ -59,21 +59,21 @@ def _save_synthetic_single_tone_dataset(path, f_offset_hz, spectralwidth=2000.0,
     savemat(str(path), mdict=mdict)
 
 
-def _save_synthetic_dataset(path, noisy_clean_axis_size, seed=0):
+def _save_synthetic_dataset(path, noisy_clean_axis_size, seed=0, batch_size=2):
     from scipy.io import savemat
     rng = np.random.default_rng(seed)
     # (batch, noisy/clean, channels, length) -- matches mainFcns._save()'s
     # 'spectra' field shape. noisy_clean_axis_size=1 reproduces the
     # noise=False case that used to trigger the squeeze_me bug.
-    spectra = rng.standard_normal((2, noisy_clean_axis_size, 2, 32)).astype(np.float32)
+    spectra = rng.standard_normal((batch_size, noisy_clean_axis_size, 2, 32)).astype(np.float32)
     mdict = {
         'spectra': spectra,
         'spectral_fit': spectra.copy(),
         'baselines': [],
         'residual_water': [],
-        'params': np.zeros((2, 3), dtype=np.float32),
-        'quantities': {'coefficient': np.zeros(2, dtype=np.float32)},
-        'SNR': {'power': np.zeros(2, dtype=np.float32)},
+        'params': np.zeros((batch_size, 3), dtype=np.float32),
+        'quantities': {'coefficient': np.zeros(batch_size, dtype=np.float32)},
+        'SNR': {'power': np.zeros(batch_size, dtype=np.float32)},
         'cropRange': [0.2, 4.2],
         'ppm': np.linspace(0.2, 4.2, 32).astype(np.float32),
         # Deliberately no 'dwelltime' key -- matches a real simulated
@@ -136,6 +136,28 @@ def test_export_does_not_crash_when_noisy_clean_axis_is_squeezed_away(tmp_path):
 
     nii_path = tmp_path / 'dataset_noise_false.nii.gz'
     assert nii_path.exists()
+
+
+def test_export_batch_of_one_and_noise_false_together_does_not_over_squeeze(tmp_path):
+    """
+    Regression test: a batch of exactly 1 sample *and* noise=False
+    together squeeze away BOTH the batch and noisy/clean axes at once
+    (scipy.io.loadmat's squeeze_me=True has no way to restore just one),
+    which the single-axis restoration above doesn't cover -- the length
+    axis used to get silently mistaken for noisy/clean, discarding most
+    of the data. Checks the actual spectral length survives, not just
+    that export doesn't crash.
+    """
+    n_pts = 32
+    path = tmp_path / 'dataset_batch1_noisefalse.mat'
+    _save_synthetic_dataset(path, noisy_clean_axis_size=1, batch_size=1)
+
+    exporter = Mat2NIfTI_MRS(test_output=False)
+    exporter.forward(datapath=str(path))
+
+    import nibabel as nib
+    img = nib.load(str(tmp_path / 'dataset_batch1_noisefalse.nii.gz'))
+    assert img.shape[-1] == n_pts
 
 
 def test_export_computes_dwelltime_from_spectralwidth_when_missing(tmp_path):

@@ -55,9 +55,18 @@ def prepare(config_file):
                   ppm_ref=config.ppm_ref,
                   spectral_resolution=config.spectral_resolution,
                   spectralwidth=config.spectralwidth,
-                #   snr_metab=config.snr_metab,
                   wrt_metab=config.wrt_metab,
-                  snr_metab=config.snr_metab,
+                  # snr_metab names the metabolite whose peak amplitude is
+                  # used as the reference signal for the WHOLE SPECTRUM's
+                  # target/realized SNR (generate_noise()'s max_val) --
+                  # not a request to compute that one metabolite's own
+                  # SNR value (every basis line's own pSNR/sSNR is always
+                  # computed regardless, see forward()). Defaults to None
+                  # here (was config.snr_metab, requiring every config to
+                  # set it) so PhysicsModel.initialize()'s own fallback to
+                  # wrt_metab applies -- confirmed that's already
+                  # implemented there for exactly this case.
+                  snr_metab=getattr(config, 'snr_metab', None),
                   # V1_0 (default True): preserves the unconditional
                   # double-broadening behavior for backward compatibility
                   # with existing v1-generated datasets; set to false in a

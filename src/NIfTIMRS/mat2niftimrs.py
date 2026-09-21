@@ -72,7 +72,17 @@ class Mat2NIfTI_MRS():
         # axis on purpose; it was just operating on a misaligned array).
         # Restore the squeezed-away axis explicitly rather than changing
         # loadmat_as_dict()'s shared default behavior.
-        if specDataCmplx.ndim == 3:
+        #
+        # BUGFIX (v2.0, follow-up): a batch of exactly 1 sample *and*
+        # noise=False together squeeze away BOTH axes at once (shape
+        # (1, 1, 2, 2048) loads back as (2, 2048), ndim==2), which the
+        # single-axis restoration above doesn't cover -- confirmed this
+        # silently mistook the length axis for noisy/clean and discarded
+        # most of the data. Restore both axes (batch and noisy/clean) in
+        # that case instead of just one.
+        if specDataCmplx.ndim == 2:
+            specDataCmplx = np.expand_dims(specDataCmplx, axis=(0, 1))
+        elif specDataCmplx.ndim == 3:
             specDataCmplx = np.expand_dims(specDataCmplx, axis=1)
 
         if isinstance(label,type(None)) and specDataCmplx.shape[1]>>1:
