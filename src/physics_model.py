@@ -335,8 +335,22 @@ class PhysicsModel(nn.Module):
         # print('PM.: ',l,l*self.num_spins, self.MM)
         # Should be a global fshift then individual metabolites 
         # and MM/Lip fsfhitfs
-        names.append('d'),                  mult.append(l*self.num_spins)
-        names.append('dmm'),                mult.append(self.MM*self.num_spins)
+        # v2.0 (handover section 11 follow-up): 'd' (Lorentzian decay
+        # rate) previously had a separate 'dmm' entry for MM/lipid lines,
+        # mirroring 'g'/'gmm' -- but per the repo owner directly, only the
+        # Gaussian term ('g', already split from 'gmm' -- see
+        # set_parameter_constraints()) needs a distinct MM-specific value;
+        # the Lorentzian term uses the identical exp(-d*t) formula for
+        # every line regardless of whether it's a real metabolite or MM/
+        # lipid, with no meaningful physical distinction. 'dmm' was never
+        # actually wired into self.index anyway (self.index['d'] already
+        # covered every line, metab+MM together, via this exact combined
+        # column count -- confirmed directly). Folded into a single 'd'
+        # entry spanning every line; total column count and position are
+        # unchanged (l*num_spins + MM*num_spins is exactly what
+        # self.index['d']'s own construction, elsewhere in this method,
+        # already expects).
+        names.append('d'),                  mult.append(l*self.num_spins + self.MM*self.num_spins)
         names.append('g'),                  mult.append(l*self.num_spins)
         names.append('gmm'),                mult.append(self.MM*self.num_spins)
         names.append('fshift'),             mult.append(1)
@@ -480,7 +494,11 @@ class PhysicsModel(nn.Module):
                     temp['min'] = 0
                     temp['max'] = 1
                 met = True
-            elif m in ['d','dmm']:
+            elif m == 'd':
+                # 'dmm' no longer exists as a separate name (folded into
+                # 'd' in initialize() -- see that comment); this branch
+                # already treated 'd' and 'dmm' identically via the same
+                # positional offset below, so nothing else here changes.
                 # print(i, m, num_mets, i-num_mets, header[i-num_mets])
                 met = header[i-num_mets]
                 try:
@@ -1704,17 +1722,22 @@ class PhysicsModel(nn.Module):
         # broadening) and 'gmm' (MM/lipid) share ONE combined per-line
         # array, self.index['g'] -- there is no separate self.index['gmm']
         # (metabolite lines first, then MM/lipid -- order_metab(), src/
-        # aux/aux.py). Per the repo owner directly: this and 'd'/'dmm'
+        # aux/aux.py). Per the repo owner directly: this (and, before it
+        # was folded into plain 'd' -- see initialize() -- 'dmm' too)
         # were never a bug -- config-driven parameter sampling was an
         # implementation the repo owner started but never finished (their
         # own workflows define sampling directly in Python, e.g.
         # sim_COWS.py), which is why "_g"/"_gmm" (with a leading
         # underscore) never matched anything here. 'g'/'gmm' are wired up
-        # now (as a config convenience); 'd'/'dmm' are deliberately left
-        # as-is, since 'd' already gets a scientifically-grounded, per-
-        # metabolite default from the basis-set's own T2 database in
-        # define_parameter_ranges() -- overriding that with one uniform
-        # config-wide range would be a bigger, separate change.
+        # now (as a config convenience). 'd' has no equivalent "gmm-style"
+        # split: unlike 'g' (where MM/lipid lines may need a genuinely
+        # different Gaussian broadening value), the Lorentzian term uses
+        # the identical exp(-d*t) formula for every line regardless of
+        # metabolite vs. MM/lipid, and 'd' already gets a scientifically-
+        # grounded, per-metabolite default from the basis-set's own T2
+        # database in define_parameter_ranges() -- a config "d" override
+        # here applies that single value/range to every line uniformly,
+        # same as any other plain (non-'g') key in the loop below.
         #
         # Per the repo owner's explicit instruction: keep this as ONE
         # grouped tensor array (writing into different slices of the same

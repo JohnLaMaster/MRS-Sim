@@ -140,26 +140,19 @@ def test_validate_database_clean_db_has_no_problems():
     assert validate_database(clean) == []
 
 
-def test_validate_database_against_real_database_finds_known_issues():
+def test_validate_database_against_real_database_has_no_known_issues():
     """
-    Regression test: as of this writing, the real database has 3 known
-    moiety-array length mismatches (glcB, naa, try) -- see
-    docs/v2/progress_log.md. This test pins that known state so a future
-    fix to the database (or a newly introduced one) is visible here rather
-    than silently passing or failing.
-
-    'glc' (originally flagged here) was split into 'glcA'/'glcB' by the
-    repo owner directly (commit `dffb5ed`, outside this session) -- only
-    'glcB' still has the length mismatch post-split.
+    Regression test: the real database used to have 3 known moiety-array
+    length mismatches (glcB, naa, try -- each had one T2.spins.min/max
+    array one entry longer than omega, in each case an accidental extra
+    trailing value duplicating that metabolite's own T2.metab.max) -- see
+    docs/v2/progress_log.md. Fixed directly (repo owner's request); this
+    now pins the clean state so a newly introduced mismatch is caught
+    here instead of silently passing.
     """
     with open('src/basis_sets/metabolites_database.json') as f:
         db = json.load(f)
-    problems = validate_database(db)
-    flagged = {p.split("'")[1] for p in problems}
-    assert flagged == {'glcB', 'naa', 'try'}, (
-        f"Expected exactly the known mismatches {{'glcB', 'naa', 'try'}}, got {flagged}. "
-        f"If you just fixed the database, update this test to reflect the new state."
-    )
+    assert validate_database(db) == []
 
 
 def test_real_database_has_t1_schema_placeholder_for_every_metabolite():

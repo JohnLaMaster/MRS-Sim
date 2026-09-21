@@ -2130,6 +2130,56 @@ commit `dffb5ed`, split that entry into `'glcA'`/`'glcB'` -- only
 `'glcB'` still has the pre-existing length mismatch) -- updated to match
 current reality, unrelated to the data-entry work above.
 
+## Milestone 28 — fix glcB/naa/try database mismatches; fold 'dmm' into 'd' (commit TBD)
+
+**Handover section addressed**: 11, closing out the last two open items
+from that audit.
+
+**`glcB`/`naa`/`try` moiety-array length mismatches -- fixed**: all three
+had a `T2.spins.min`/`max` array exactly one entry longer than `omega`
+(and `spin_labels`). In `naa`'s case the extra trailing value
+(`320.170`) exactly duplicated that metabolite's own `T2.metab.max`
+(`320.17`) -- an accidental extra append, not real per-spin data.
+`glcB`/`try`'s extra entries were plain default-filled values (`250`
+repeated), consistent with the same kind of copy-paste-with-one-too-
+many-repeats mistake. Fixed by truncating each array to match `omega`'s
+length. `validate_database()` now returns `[]` for the real database.
+`tests/test_metabolite_database.py`'s pinned-known-issues test rewritten
+to assert the clean state instead (`test_validate_database_against_real_database_has_no_known_issues`).
+
+**`dmm` folded into `d`**: repo owner's direct reasoning, confirmed
+correct by re-reading the lineshape code -- `d` (Lorentzian decay,
+`exp(-d*t)`) uses the identical formula for every line regardless of
+metabolite vs. MM/lipid, unlike `g` (Gaussian, where MM/lipid genuinely
+may need a different value, already split into `'g'`/`'gmm'` in
+Milestone 21). `'dmm'` was never actually wired into `self.index` at all
+(confirmed back in Milestone 21's investigation) -- `self.index['d']`
+already spanned every line, metab+MM together. `initialize()`'s
+`names`/`mult` list previously still allocated `'d'` (metabolite-only
+count) and `'dmm'` (MM-only count) as two separate named sub-ranges
+purely for `define_parameter_ranges()`'s default-range lookup, even
+though nothing ever read a `'dmm'`-specific value out of them. Folded
+into one `'d'` entry spanning `l*num_spins + MM*num_spins` columns
+(exactly what `self.index['d']`'s own construction already expected).
+`define_parameter_ranges()`'s `elif m in ['d','dmm']:` simplified to
+`elif m == 'd':` -- the branch already treated both names identically
+via the same positional offset, so this is a pure simplification.
+
+**Verified as a true no-op, not just "doesn't crash"**: saved
+`min_ranges`/`max_ranges`/`index['d']`/`index['g']`/`index['overall']`
+from `cows.json`'s real basis set *before* this change (via `git stash`)
+and compared against the same after the change -- `index['d']`,
+`index['g']`, `index['overall']`'s length, and both range tensors are
+**bit-identical** (`torch.allclose` true, zero max abs diff). Confirms
+this is a pure refactor (removes an unused, never-wired-up code path)
+with no numeric behavior change for any existing config.
+
+**Tests**: no new committed tests (this is an internal bookkeeping
+simplification with no new externally-observable behavior to test --
+the existing `set_parameter_constraints`/`g`/`b0`-guard tests already
+exercise the column-index machinery this touches). Full suite: 158/158
+passing; before/after numeric equivalence verified manually as above.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across
