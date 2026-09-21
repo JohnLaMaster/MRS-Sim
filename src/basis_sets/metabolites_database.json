@@ -259,8 +259,8 @@
                  "max": [15.824]}},
     "mi": {
         "omega": [3.5217, 4.0538, 3.5218, 3.6144, 3.2690, 3.6144],
-        "spin_labels": [""],
-        "moieties": {"": [""]},
+        "spin_labels": ["mi352a", "mi405", "mi352b", "mi361a", "mi326", "mi361b"],
+        "moieties": {"mi": ["mi352a", "mi405", "mi352b", "mi361a", "mi326", "mi361b"]},
         "T2": {"spins": {"min": [19, 19, 19, 19, 19, 19],
                          "max": [439, 439, 439, 439, 439, 439]},
                "metab": {"min": [139.8],
@@ -271,8 +271,9 @@
                  "max": [23.393]}},
     "naa": {
         "omega": [2.0080, 4.3817, 2.6727, 2.4863, 7.8205],
-        "spin_labels": [""],
-        "moieties": {"": [""]},
+        "spin_labels": ["naa200", "naa438", "naa267", "naa248", "naa782"],
+        "moieties": {"ace": ["naa200"],
+                     "asp": ["naa438", "naa267", "naa248", "naa782"]},
         "T2": {"spins": {"min": [125, 109, 109, 109, 242.7],
                          "max": [411, 376, 376, 376, 376, 320.170]},
                "metab": {"min": [242.7],
@@ -283,8 +284,10 @@
                  "max": [0.440]}},
     "naag": {
         "omega": [4.1280, 1.8810, 2.0490, 2.1900, 2.1800, 2.042, 4.607, 2.7210, 2.5190],
-        "spin_labels": [""],
-        "moieties": {"": [""]},
+        "spin_labels": ["naag412", "naag188", "naag204a", "naag219", "naag218", "naag204b", "naag460", "naag272", "naag251"],
+        "moieties": {"glu": ["naag412", "naag188", "naag204a", "naag219", "naag218"],
+                     "ace": ["naag204b"],
+                     "asp": ["naag460", "naag272", "naag251"]},
         "T2": {"spins": {"min": [36, 36, 36, 36, 36, 69, 27, 27, 27],
                          "max": [216.11, 216.11, 216.11, 216.11, 216.11, 229, 234, 234, 234]},
                "metab": {"min": [132.87],
@@ -295,8 +298,9 @@
                  "max": [2.750]}},
     "pa": {
         "omega": [3.9750, 3.2730, 3.1050, 7.3223, 7.4201, 7.3693, 7.4201, 7.3223],
-        "spin_labels": [""],
-        "moieties": {"": [""]},
+        "spin_labels": ["pa397", "pa327", "pa310", "pa732a", "pa742a", "pa736", "pa742b", "pa732b"],
+        "moieties": {"ala": ["pa397", "pa327", "pa310"],
+                     "phe": ["pa732a", "pa742a", "pa736", "pa742b", "pa732b"]},
         "T2": {"spins": {"min": [0, 0, 0, 0, 0, 0, 0, 0],
                          "max": [0, 0, 0, 0, 0, 0, 0, 0]},
                "metab": {"min": [0],
@@ -307,8 +311,8 @@
                  "max": [0.440]}},
     "pch": {
         "omega": [4.2805, 4.2805, 3.641, 3.641, 3.208],
-        "spin_labels": [""],
-        "moieties": {"": [""]},
+        "spin_labels": ["pch428a", "pch428b", "pch364a", "pch364b", "pch320"],
+        "moieties": {"pch": ["pch428a", "pch428b", "pch364a", "pch364b", "pch320"]},
         "T2": {"spins": {"min": [93, 93, 93, 93, 119],
                          "max": [345, 345, 345, 345, 394]},
                "metab": {"min": [100],
@@ -319,8 +323,8 @@
                  "max": [4.288]}},
     "pcr": {
         "omega": [3.0290, 3.9300, 6.5810, 7.2960],
-        "spin_labels": [""],
-        "moieties": {"": [""]},
+        "spin_labels": ["pcr302", "pcr393", "pcr658", "pcr729"],
+        "moieties": {"pcr": ["pcr302", "pcr393", "pcr658", "pcr729"]},
         "T2": {"spins": {"min": [130, 100, 130, 130],
                          "max": [210, 180, 210, 210]},
                "metab": {"min": [100],
@@ -331,8 +335,8 @@
                  "max": [10.123]}},
     "pe": {
         "omega": [3.9765, 3.9765, 3.216, 3.216],
-        "spin_labels": [""],
-        "moieties": {"": [""]},
+        "spin_labels": ["pe397a", "pe397b", "pe321a", "pe321b"],
+        "moieties": {"pe": ["pe397a", "pe397b", "pe321a", "pe321b"]},
         "T2": {"spins": {"min": [34, 34, 34, 34],
                          "max": [250, 250, 250, 250]},
                "metab": {"min": [34],
@@ -343,8 +347,8 @@
                  "max": [2.20]}},
     "pyr": {
         "omega": [2.3590],
-        "spin_labels": [""],
-        "moieties": {"": [""]},
+        "spin_labels": ["pyr235"],
+        "moieties": {"pyr": ["pyr235"]},
         "T2": {"spins": {"min": [100],
                          "max": [250]},
                "metab": {"min": [100],
@@ -355,8 +359,8 @@
                  "max": [0.55]}},
     "si": {
         "omega": [3.3400],
-        "spin_labels": [""],
-        "moieties": {"": [""]},
+        "spin_labels": ["si334"],
+        "moieties": {"si": ["si334"]},
         "T2": {"spins": {"min": [73],
                          "max": [250]},
                "metab": {"min": [73],
@@ -366,9 +370,9 @@
         "Conc": {"min": [0.09],
                  "max": [0.563]}},
     "ser": {
-        "spin_labels": [""],
-        "moieties": {"": [""]},
         "omega": [3.8347, 3.9379, 3.9764],
+        "spin_labels": ["ser834", "ser937", "ser976"],
+        "moieties": {"ser": ["ser834", "ser937", "ser976"]},
         "T2": {"spins": {"min": [100, 100, 100],
                          "max": [250, 250, 250]},
                "metab": {"min": [100],
@@ -379,6 +383,8 @@
                  "max": [2.20]}},
     "tau": {
         "omega": [3.4206, 3.4206, 3.2459, 3.2459],
+        "spin_labels": ["tau342a", "tau342b", "tau324a", "tau324b"],
+        "moieties": {"tau": ["tau342a", "tau342b", "tau324a", "tau324b"]},
         "T2": {"spins": {"min": [66, 66, 66, 66],
                          "max": [231.14, 231.14, 231.14, 231.14]},
                "metab": {"min": [66],
@@ -389,6 +395,8 @@
                  "max": [6.60]}},
     "thr": {
         "omega": [3.5784, 4.2444, 1.3158, 1.3158, 1.3158],
+        "spin_labels": ["thr357", "thr424", "thr131a", "thr131b", "thr131c"],
+        "moieties": {"thr": ["thr357", "thr424", "thr131a", "thr131b", "thr131c"]},
         "T2": {"spins": {"min": [100, 100, 100, 100, 100],
                          "max": [250, 250, 250, 250, 250]},
                "metab": {"min": [100],
@@ -399,6 +407,9 @@
                  "max": [0.55]}},
     "try": {
         "omega": [4.0468, 3.4739, 7.312, 7.26, 7.2788, 7.197, 7.536],
+        "spin_labels": ["try404", "try347", "try731", "try726", "try727", "try719", "try753"],
+        "moieties": {"ala": ["try404", "try347"],
+                     "ind": ["try731", "try726", "try727", "try719", "try753"]},
         "T2": {"spins": {"min": [100, 100, 100, 100, 100, 100, 100, 100],
                          "max": [250, 250, 250, 250, 250, 250, 250, 250]},
                "metab": {"min": [100],
@@ -409,6 +420,9 @@
                  "max": [0]}},
     "tyr": {
         "omega": [3.9281, 3.1908, 3.037, 7.1852, 6.8895, 6.8895, 7.1852],
+        "spin_labels": ["tyr392", "tyr319", "tyr303", "tyr718a", "tyr688a", "tyr688b", "tyr718b"],
+        "moieties": {"ala": ["tyr392", "tyr319", "tyr303"],
+                     "phe": ["tyr718a", "tyr688a", "tyr688b", "tyr718b"]},
         "T2": {"spins": {"min": [100, 100, 100, 100, 100, 100, 100],
                          "max": [250, 250, 250, 250, 250, 250, 250]},
                "metab": {"min": [100],
@@ -419,6 +433,8 @@
                  "max": [0]}},
     "val": {
         "omega": [3.5953, 2.2577, 1.0271, 0.9764],
+        "spin_labels": ["val359", "val225", "val102", "val097"],
+        "moieties": {"val": ["val359", "val225", "val102", "val097"]},
         "T2": {"spins": {"min": [100, 100, 100, 100],
                          "max": [250, 250, 250, 250]},
                "metab": {"min": [100],
@@ -429,6 +445,8 @@
                  "max": [0]}},
     "water": {
         "omega": [4.65],
+        "spin_labels": ["water465"],
+        "moieties": {"water": ["water465"]},
         "T2": {"spins": {"min": [70],
                          "max": [120]},
                "metab": {"min": [70],
@@ -439,6 +457,8 @@
                  "max": [1]}},
     "mm092": {
         "omega": [0.92],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -449,6 +469,8 @@
                  "max": [33]}},
     "mm121": {
         "omega": [1.21],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -459,6 +481,8 @@
                  "max": [9]}},
     "mm139": {
         "omega": [1.39],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -469,6 +493,8 @@
                  "max": [39]}},
     "mm167": {
         "omega": [1.67],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -479,6 +505,8 @@
                  "max": [17]}},
     "mm204": {
         "omega": [2.04],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -489,6 +517,8 @@
                  "max": [39]}},
     "mm226": {
         "omega": [2.26],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -499,6 +529,8 @@
                  "max": [22]}},
     "mm270": {
         "omega": [2.70],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -509,6 +541,8 @@
                  "max": [8]}},
     "mm299": {
         "omega": [2.99],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -519,6 +553,8 @@
                  "max": [11]}},
     "mm321": {
         "omega": [3.21],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -529,6 +565,8 @@
                  "max": [8]}},
     "mm375": {
         "omega": [3.75],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -539,6 +577,8 @@
                  "max": [11]}},
     "mm09": {
         "omega": [0.9],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -549,6 +589,8 @@
                  "max": [33]}},
     "mm12": {
         "omega": [0.9],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -559,6 +601,8 @@
                  "max": [9]}},
     "mm14": {
         "omega": [1.40],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -569,6 +613,8 @@
                  "max": [39]}},
     "mm17": {
         "omega": [1.70],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -579,6 +625,8 @@
                  "max": [17]}},
     "mm20": {
         "omega": [2.0],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -589,6 +637,8 @@
                  "max": [39]}},
     "lip09": {
         "omega": [3.75],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -599,6 +649,8 @@
                 "max": [10]}},
     "lip13": {
         "omega": [2.99],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -609,6 +661,8 @@
                  "max": [77]}},
     "lip20": {
         "omega": [3.21],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],
@@ -619,6 +673,8 @@
                  "max": [13]}},
     "lip21": {
         "omega": [3.21],
+        "spin_labels": [""],
+        "moieties": {"": [""]},
         "T2": {"spins": {"min": [20],
                          "max": [60]},
                "metab": {"min": [20],

@@ -143,17 +143,21 @@ def test_validate_database_clean_db_has_no_problems():
 def test_validate_database_against_real_database_finds_known_issues():
     """
     Regression test: as of this writing, the real database has 3 known
-    moiety-array length mismatches (glc, naa, try) -- see
+    moiety-array length mismatches (glcB, naa, try) -- see
     docs/v2/progress_log.md. This test pins that known state so a future
     fix to the database (or a newly introduced one) is visible here rather
     than silently passing or failing.
+
+    'glc' (originally flagged here) was split into 'glcA'/'glcB' by the
+    repo owner directly (commit `dffb5ed`, outside this session) -- only
+    'glcB' still has the length mismatch post-split.
     """
     with open('src/basis_sets/metabolites_database.json') as f:
         db = json.load(f)
     problems = validate_database(db)
     flagged = {p.split("'")[1] for p in problems}
-    assert flagged == {'glc', 'naa', 'try'}, (
-        f"Expected exactly the known mismatches {{'glc', 'naa', 'try'}}, got {flagged}. "
+    assert flagged == {'glcB', 'naa', 'try'}, (
+        f"Expected exactly the known mismatches {{'glcB', 'naa', 'try'}}, got {flagged}. "
         f"If you just fixed the database, update this test to reflect the new state."
     )
 

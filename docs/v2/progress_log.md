@@ -2085,6 +2085,51 @@ Milestones 22/25/26):
   the resulting spectrum matches the original bit-for-bit (the actual
   guarantee "parameter replay" is meant to provide).
 
+## Milestone 27 — filled in remaining metabolites' spin_labels/moieties (commit TBD)
+
+**Data entry, not a code change**: `src/basis_sets/metabolites_database.json`'s
+`spin_labels`/`moieties` were placeholders or entirely missing for 16
+metabolites. Pattern derived directly from the repo owner's reference
+spreadsheet (https://docs.google.com/spreadsheets/d/1fR3_iq1IdzGwDwnvelIVmZsS7JR_Rr1kKx6mAHN6mfA)
+and confirmed against it: `spin_label = {metabolite_key}{3-digit ppm
+code}{disambiguation letter if needed}`, where the ppm code truncates
+(not rounds) the shift to its ones-digit + first two decimals; moiety
+keys are the sheet's own sub-group name (lowercased, truncated to 3
+letters, e.g. `glycine→gly`) in the sheet's given order, or the
+metabolite's own key for single-moiety metabolites. Filled in against
+each metabolite's *existing* `omega` array (not recomputed) --
+`mi, naa, naag, pa, pch, pcr, pe, pyr, si, ser` (had placeholder
+`spin_labels: [""]`) and `tau, thr, try, tyr, val, water` (had no
+`spin_labels`/`moieties` key at all). Added the same placeholder shape
+(`spin_labels: [""], moieties: {"": [""]}`) to all 19 macromolecule/lipid
+entries (`mm09`...`mm375`, `lip09`...`lip21`), which previously had
+neither key nor a placeholder, per the repo owner's request, so every
+entry in the file now has the same two keys present.
+
+**Found while doing this, not fixed (pre-existing, unrelated)**: `asc`
+(Ascorbate)'s `spin_labels` are correct, but its `moieties` dict is
+`{"ace": ["ace190"]}` -- looks copy-pasted from the unrelated `ace`
+(Acetate) entry rather than built from `asc`'s own labels. Flagged for
+the repo owner rather than fixed.
+
+**Correction, repo owner directly**: an initial draft of this milestone
+added a committed pytest test asserting every metabolite's `spin_labels`/
+`omega`/`moieties` stay internally consistent. Removed -- correctly
+called out as overreach for what is fundamentally manual reference-data
+entry, not a code-behavior change; the test also immediately broke on
+the unrelated pre-existing `asc` issue above, which isn't what a test
+added for *this* change should be judged against. Verified instead with
+one-off `python -c` checks (JSON validity, `spin_labels`/`omega` length
+match, `moieties` partitioning `spin_labels` exactly) for the specific
+entries touched, not as committed test infrastructure.
+
+Also fixed, in the same pass: `tests/test_metabolite_database.py`'s
+`test_validate_database_against_real_database_finds_known_issues` had
+gone stale (pinned `'glc'`, but the repo owner's own direct edit,
+commit `dffb5ed`, split that entry into `'glcA'`/`'glcB'` -- only
+`'glcB'` still has the pre-existing length mismatch) -- updated to match
+current reality, unrelated to the data-entry work above.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across
