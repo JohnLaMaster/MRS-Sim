@@ -2300,6 +2300,78 @@ reshape work, not attempted in this pass (not part of the repo owner's
 request here, and there is still no real per-moiety basis set to
 validate it against).
 
+## Milestone 30 — verify concentration sharing across moieties; CRLB/FIM plumbing for moiety-level 'd' (commit TBD)
+
+**Handover section addressed**: 18 follow-up, continuing Milestone 29.
+
+**Repo owner's request, part 1**: confirm each moiety shares the same
+concentration within a metabolite for a given sample. Confirmed directly
+with a synthetic check of `PhysicsModel.modulate()` (the function that
+applies sampled concentration to a metabolite's basis FID): `amp`
+(`self.index['metabolites']`, one column per metabolite/MM line, never
+per moiety) is unsqueezed and broadcast across `fids`' moiety axis before
+multiplying, so a single sampled concentration value is applied
+identically to every moiety of that line by construction -- verified with
+a fabricated `[1, 2-line, 3-moiety, 2, 4]` FID and distinct per-line
+concentrations, confirming all 3 moieties of a line receive the exact
+same scale factor as each other and differ correctly between lines. No
+bug; no code change needed (this was already true before Milestone 29,
+since concentration was never given a moiety-scaled column).
+
+**Repo owner's request, part 2**: build the CRLB/FIM plumbing for
+moiety-level `'d'`, closing the "known limitation, not addressed here"
+item Milestone 29 flagged for `src/crlb.py`. `compute_crlb()` previously
+assumed `len(pm.index['d']) == len(pm.index['g']) ==
+len(pm.index['f_shifts'])` (all sized from `pm.index['d']`) and
+`pm.syn_basis_fids.squeeze(0)` shaped `[n_lines, 2, L]` -- both broken by
+Milestone 29's moiety-aware `'d'` (which can now have more columns than
+lines) and 5-D `syn_basis_fids`.
+
+**What changed** (`src/crlb.py`):
+- `n_lines` now reads from `pm.index['g']` (always one column per line,
+  regardless of moiety count) instead of `pm.index['d']` (which can now
+  be larger). Identical value to before for every basis set shipped
+  today (`pm.num_spins` is always 1).
+- `_build_layout()` gained a `num_spins` parameter: `'d'` gets
+  `n_lines * num_spins` columns, every other family is unaffected.
+  Defaults to 1 (existing callers/tests unchanged).
+- `_crlb_signal_model()` gained a `num_spins` parameter and a new code
+  path (the `num_spins == 1` branch is untouched, byte-for-byte, from
+  before this change) for `num_spins > 1`: decay (`'d'`, per moiety) and
+  frequency shift (`'fshift'`, per line, shared across moieties) are
+  applied per the moiety-expanded `basis_fids` (`[n_lines, num_spins, 2,
+  L]`), moieties are summed (mirroring
+  `PhysicsModel.forward()`'s `fid.ndim==5: fid.sum(dim=-3)`), then lines
+  are summed -- same order as the real pipeline. New
+  `_voigt_decay_moiety()` mirrors `_voigt_decay()` with 'g' broadcasting
+  across the moiety axis instead of being tiled into one, matching
+  `PhysicsModel.lineshape_correction()`'s fix in Milestone 29.
+- `compute_crlb()` reads `pm.num_spins` and threads it through; labels
+  for `'d'` become `'<name>.d[<moiety>]'` per moiety when `num_spins>1`
+  (matching `ParameterRegistry.labels()`'s own moiety-aware labeling from
+  Milestone 29), unchanged (`'<name>.d'`) otherwise.
+
+**Verified as a true no-op for every basis set shipped today**: saved
+`compute_crlb()`'s `crlb`/`fim`/`labels` output (fixed seed, 3-sample
+batch, `cows.json`'s real basis set, `return_fim=True`) *before* this
+change (via `git stash`) and compared against the same *after* --
+**bit-identical** (`torch.equal` true for both `crlb` and `fim`, exact
+label-list equality).
+
+**New tests** (no real per-moiety basis set exists, so these use
+fabricated multi-moiety inputs, matching this module's existing
+convention of testing `_crlb_signal_model`/`_build_layout` directly with
+plain tensors): `_voigt_decay_moiety` reduces to `_voigt_decay` for one
+moiety; `_build_layout`'s `'d'`-only scaling; signal-model output
+shape/finiteness for the moiety path; a cross-validation test proving the
+moiety-aware model mathematically agrees with the plain model when both
+moieties of a line are given identical decay/shift (decay-then-sum must
+equal sum-then-decay in that degenerate case -- and does, to full
+`torch.testing.assert_close` tolerance); a sensitivity test confirming
+each moiety's own `'d'` column independently and distinguishably affects
+the output (not aliased together); vmap+jacrev batchability for the
+moiety path. Full suite: 178/178 passing.
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across

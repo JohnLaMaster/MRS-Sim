@@ -19,6 +19,15 @@ the full stochastic generative pipeline (bounded-random-walk baseline
 generation, B0 field maps, etc. are not part of "the signal model" in the
 CRLB sense even in the classic literature).
 
+Moiety-level `'d'` (v2.0 handover section 18 follow-up): when
+`pm.num_spins > 1` (dormant for every basis set shipped today -- see
+`PhysicsModel.initialize()`), `'d'` gets one column per moiety instead of
+per line, while `'amp'`/`'g'`/`'fshift'` stay one column per line, shared
+across that line's moieties -- mirroring `PhysicsModel.modulate()`/
+`lineshape_correction()` exactly. Handled transparently by
+`compute_crlb()` (reads `pm.num_spins`); see `_crlb_signal_model`'s
+`num_spins` parameter for the underlying model change.
+
 **Which parameters are estimated vs. fixed** (repo-owner request,
 docs/v2/progress_log.md): every parameter family above is always applied
 in the forward model at its actual sampled/fitted value -- excluding a
@@ -95,6 +104,26 @@ def _voigt_decay(d: torch.Tensor, g: torch.Tensor, t: torch.Tensor) -> torch.Ten
     return torch.exp((-d - g * t.unsqueeze(0)) * t.unsqueeze(0))
 
 
+def _voigt_decay_moiety(d: torch.Tensor, g: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    """
+    v2.0 (handover section 18 follow-up): moiety-aware counterpart to
+    `_voigt_decay` -- 'd' (Lorentzian) has one value per MOIETY, 'g'
+    (Gaussian) stays one value per LINE shared across that line's
+    moieties, one-to-one with `PhysicsModel.lineshape_correction()`'s 'd'/
+    'g' reshape (see that method's comment). Not exercised by any basis
+    set shipped today (`PhysicsModel.num_spins` is always 1 -- see
+    `initialize()`); ready for the day a basis set supplies real
+    per-moiety FIDs.
+
+    d: [n_lines, num_spins]. g: [n_lines]. t: [L]. Returns
+    [n_lines, num_spins, L].
+    """
+    d = d.unsqueeze(-1)                # [n_lines, num_spins, 1]
+    g = g.view(-1, 1, 1)               # [n_lines, 1, 1] -- broadcasts over the moiety axis
+    t_ = t.view(1, 1, -1)
+    return torch.exp((-d - g * t_) * t_)
+
+
 def _crlb_signal_model(
     theta_est: torch.Tensor,
     theta_fixed: torch.Tensor,
@@ -105,6 +134,7 @@ def _crlb_signal_model(
     phi1_ref: torch.Tensor,
     layout_est: dict,
     layout_fixed: dict,
+    num_spins: int = 1,
 ) -> torch.Tensor:
     """
     Single-sample (no batch dim), differentiable, real-valued observation
@@ -124,6 +154,17 @@ def _crlb_signal_model(
     `basis_fids`: [n_lines, 2, L] (PhysicsModel.syn_basis_fids with its
     leading batch=1 dimension squeezed out). `t`, `phi1_ref`: [L].
     `spline_basis`: [L, n_basis].
+
+    `num_spins` (v2.0 handover section 18 follow-up, default 1): when >1,
+    `basis_fids` is instead `[n_lines, num_spins, 2, L]` and `'d'` has
+    `n_lines * num_spins` entries (one per moiety, `layout_est`/
+    `layout_fixed` sized accordingly by `compute_crlb`/`_build_layout`) --
+    'amp'/'g'/'fshift' stay one value per line, shared across that line's
+    moieties, mirroring `PhysicsModel.modulate()`/
+    `lineshape_correction()`'s 'g' reshape exactly. Not exercised by any
+    basis set shipped today (`PhysicsModel.num_spins` is always 1); the
+    `num_spins == 1` branch below is untouched from before this parameter
+    existed.
     """
     def _get(name: str) -> torch.Tensor:
         if name in layout_est:
@@ -138,22 +179,48 @@ def _crlb_signal_model(
     phi1 = _get('phi1')
     beta = _get('beta').view(2, -1)
 
-    # modulate: amp * basis_fids (PhysicsModel.modulate's formula)
-    fid = amp.unsqueeze(-1).unsqueeze(-1) * basis_fids  # [n_lines, 2, L]
+    if num_spins == 1:
+        # modulate: amp * basis_fids (PhysicsModel.modulate's formula)
+        fid = amp.unsqueeze(-1).unsqueeze(-1) * basis_fids  # [n_lines, 2, L]
 
-    # lineshape_voigt: fid * exp((-d - g*t) * t)
-    decay = _voigt_decay(d, g, t)  # [n_lines, L]
-    fid = fid * decay.unsqueeze(1)  # broadcast over the real/imag channel dim
+        # lineshape_voigt: fid * exp((-d - g*t) * t)
+        decay = _voigt_decay(d, g, t)  # [n_lines, L]
+        fid = fid * decay.unsqueeze(1)  # broadcast over the real/imag channel dim
 
-    # frequency_shift: fid * exp(i * fshift_hz * t), via complex_exp (reused
-    # directly rather than re-derived, since it defines the exact
-    # real/imag rotation convention the rest of the pipeline relies on)
-    fshift_hz = fshift_ppm * carrier_frequency * 2 * torch.pi
-    f_shift_angle = fshift_hz.unsqueeze(-1) * t.unsqueeze(0)  # [n_lines, L]
-    fid = complex_exp(fid, f_shift_angle.unsqueeze(1))  # fid: [n_lines, 2, L]
+        # frequency_shift: fid * exp(i * fshift_hz * t), via complex_exp
+        # (reused directly rather than re-derived, since it defines the
+        # exact real/imag rotation convention the rest of the pipeline
+        # relies on)
+        fshift_hz = fshift_ppm * carrier_frequency * 2 * torch.pi
+        f_shift_angle = fshift_hz.unsqueeze(-1) * t.unsqueeze(0)  # [n_lines, L]
+        fid = complex_exp(fid, f_shift_angle.unsqueeze(1))  # fid: [n_lines, 2, L]
 
-    # line_summing: sum over lines
-    fid_sum = fid.sum(dim=0)  # [2, L]
+        # line_summing: sum over lines
+        fid_sum = fid.sum(dim=0)  # [2, L]
+    else:
+        # v2.0 (handover section 18 follow-up): moiety-level 'd'. Decay
+        # and frequency shift are applied per moiety, then moieties are
+        # summed (PhysicsModel.forward()'s `fid.ndim==5: fid.sum(dim=-3)`)
+        # before lines are summed -- mirrors the real pipeline's order
+        # exactly.
+        n_lines = amp.shape[0]
+        d_per_moiety = d.view(n_lines, num_spins)
+
+        # modulate: one amp per LINE, shared across that line's moieties
+        fid = amp.view(n_lines, 1, 1, 1) * basis_fids  # [n_lines, num_spins, 2, L]
+
+        # lineshape_voigt, per moiety ('d') but per-line ('g')
+        decay = _voigt_decay_moiety(d_per_moiety, g, t)  # [n_lines, num_spins, L]
+        fid = fid * decay.unsqueeze(-2)  # broadcast over the real/imag channel dim
+
+        # frequency_shift: one value per LINE, shared across moieties
+        fshift_hz = fshift_ppm * carrier_frequency * 2 * torch.pi
+        f_shift_angle = (fshift_hz.view(n_lines, 1, 1) * t.view(1, 1, -1)).unsqueeze(-2)
+        fid = complex_exp(fid, f_shift_angle)  # [n_lines, num_spins, 2, L]
+
+        # moiety-level basis functions are combined first, then lines
+        fid = fid.sum(dim=1)        # [n_lines, 2, L]
+        fid_sum = fid.sum(dim=0)    # [2, L]
 
     # zero_order_phase: complex_exp(fid, -phi0_rad)
     phi0_rad = phi0 * torch.pi / 180.0
@@ -196,15 +263,20 @@ def _crlb_signal_model(
     return torch.cat([observed[0], observed[1]], dim=0)  # [2L]
 
 
-def _build_layout(param_names, n_lines: int, n_basis: int) -> tuple:
+def _build_layout(param_names, n_lines: int, n_basis: int, num_spins: int = 1) -> tuple:
     """
     Assign each name in `param_names` (an ordered subset/permutation of
     `ALL_CRLB_PARAMS`) a contiguous column slice, in the given order.
     Returns `(layout, n_params)`; `layout` is empty (and `n_params` is 0)
     for an empty `param_names`, which is valid (`compute_crlb` uses this
     for the "fixed" side when nothing is excluded).
+
+    `num_spins` (v2.0 handover section 18 follow-up, default 1): 'd' gets
+    `n_lines * num_spins` columns (one per moiety); every other family
+    stays `n_lines` (or fixed-size), unaffected -- see
+    `_crlb_signal_model`'s `num_spins` docstring.
     """
-    sizes = {'amp': n_lines, 'd': n_lines, 'g': n_lines, 'fshift': n_lines,
+    sizes = {'amp': n_lines, 'd': n_lines * num_spins, 'g': n_lines, 'fshift': n_lines,
              'phi0': 1, 'phi1': 1, 'beta': 2 * n_basis}
     i = 0
     layout = {}
@@ -307,10 +379,18 @@ def compute_crlb(
     include = [p for p in ALL_CRLB_PARAMS if p in include]
     exclude = [p for p in ALL_CRLB_PARAMS if p not in include]
 
-    n_lines = len(pm.index['d'])
+    # v2.0 (handover section 18 follow-up): n_lines (the metabolite/MM
+    # line count, used to size 'amp'/'g'/'fshift') is read from
+    # pm.index['g'] rather than pm.index['d'] -- 'd' can now have more
+    # columns than there are lines when pm.num_spins>1 (one per moiety),
+    # while 'g' always stays exactly one column per line (see
+    # PhysicsModel.initialize()). Equivalent to the old `len(pm.index['d'])`
+    # for every basis set shipped today (pm.num_spins is always 1).
+    n_lines = len(pm.index['g'])
+    num_spins = getattr(pm, 'num_spins', 1)
     n_basis = spline_basis.shape[-1]
-    layout_est, n_est = _build_layout(include, n_lines, n_basis)
-    layout_fixed, n_fixed = _build_layout(exclude, n_lines, n_basis)
+    layout_est, n_est = _build_layout(include, n_lines, n_basis, num_spins=num_spins)
+    layout_fixed, n_fixed = _build_layout(exclude, n_lines, n_basis, num_spins=num_spins)
 
     amp = params[:, pm.index['metabolites']]
     d = params[:, pm.index['d']]
@@ -329,7 +409,11 @@ def compute_crlb(
     theta_fixed = (torch.cat([values[name] for name in exclude], dim=-1)
                    if exclude else amp.new_zeros(batch, 0))
 
-    basis_fids = pm.syn_basis_fids.squeeze(0)  # [n_lines, 2, L]
+    # [n_lines, 2, L] for every basis set shipped today (pm.num_spins==1);
+    # [n_lines, num_spins, 2, L] the day a basis set supplies real
+    # per-moiety FIDs (pm.syn_basis_fids.ndim==5 -- see
+    # PhysicsModel.initialize()).
+    basis_fids = pm.syn_basis_fids.squeeze(0)
     t = pm.t.squeeze()
     carrier_frequency = pm.carrier_frequency
     phi1_ref = pm.phi1_ref.squeeze()
@@ -337,7 +421,7 @@ def compute_crlb(
     def model_fn(theta_est_i, theta_fixed_i):
         return _crlb_signal_model(theta_est_i, theta_fixed_i, basis_fids, t,
                                   carrier_frequency, spline_basis, phi1_ref,
-                                  layout_est, layout_fixed)
+                                  layout_est, layout_fixed, num_spins=num_spins)
 
     jacobian_fn = vmap(jacrev(model_fn, argnums=0), in_dims=(0, 0))
     J = jacobian_fn(theta_est, theta_fixed)  # [batch, 2L, n_est]
@@ -360,9 +444,18 @@ def compute_crlb(
     # generic "line{i}" placeholder.
     from .parameters import ParameterRegistry
     line_names = ParameterRegistry.from_physics_model(pm).metabolite_names
+    # v2.0 (handover section 18 follow-up): one 'd' label per moiety
+    # (`'<name>.d[<moiety>]'`) when num_spins>1, matching
+    # ParameterRegistry.labels()'s own moiety-aware labeling; identical to
+    # before (`'<name>.d'`) when num_spins==1 (every basis set shipped
+    # today).
+    if num_spins == 1:
+        d_labels = [f'{name}.d' for name in line_names]
+    else:
+        d_labels = [f'{name}.d[{moiety}]' for name in line_names for moiety in range(num_spins)]
     label_map = {
         'amp': [f'{name}.amplitude' for name in line_names],
-        'd': [f'{name}.d' for name in line_names],
+        'd': d_labels,
         'g': [f'{name}.g' for name in line_names],
         'fshift': [f'{name}.frequency_shift' for name in line_names],
         'phi0': ['phi0'],
