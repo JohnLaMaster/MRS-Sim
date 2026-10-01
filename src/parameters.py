@@ -92,13 +92,22 @@ class MetaboliteParameterView:
     Every accessor indexes into the shared tensor; nothing is copied.
     """
 
-    __slots__ = ('_tensor', '_index', '_name', '_pos')
+    __slots__ = ('_tensor', '_index', '_name', '_pos', '_num_spins')
 
-    def __init__(self, tensor: torch.Tensor, index: Dict[str, IndexValue], name: str, pos: int):
+    def __init__(self, tensor: torch.Tensor, index: Dict[str, IndexValue], name: str, pos: int,
+                 num_spins: int = 1):
         self._tensor = tensor
         self._index = index
         self._name = name  # lowercase name, also the ind[] key for concentration
         self._pos = pos    # this line's position among all basis-function lines
+        # v2.0 (handover section 18 follow-up): PhysicsModel.num_spins --
+        # the number of moiety columns 'lorentzian' ('d') has per line.
+        # 1 for every basis set shipped today (plain 1:1 per-line
+        # indexing, same as before this was added); >1 is dormant until
+        # a basis set supplies real per-moiety FIDs (see
+        # PhysicsModel.initialize()). 'gaussian'/'frequency_shift' never
+        # scale with this -- they stay one column per line regardless.
+        self._num_spins = num_spins
 
     def _line_column(self, family: str) -> int:
         col_group = self._index[family]
@@ -115,7 +124,17 @@ class MetaboliteParameterView:
 
     @property
     def lorentzian(self) -> torch.Tensor:
-        return self._tensor[:, self._line_column(_PER_LINE_FAMILIES['lorentzian'])]
+        col_group = self._index[_PER_LINE_FAMILIES['lorentzian']]
+        if not isinstance(col_group, tuple):
+            raise KeyError("ind['d'] is not a per-line tuple; cannot index it by metabolite/line position.")
+        if self._num_spins == 1:
+            return self._tensor[:, col_group[self._pos]]
+        # Moiety-level 'd': this line owns self._num_spins consecutive
+        # columns (one per moiety, row-major -- see initialize()), not a
+        # single column. Shape: [batch, num_spins].
+        start = self._pos * self._num_spins
+        cols = col_group[start:start + self._num_spins]
+        return self._tensor[:, cols]
 
     @property
     def gaussian(self) -> torch.Tensor:
@@ -129,6 +148,8 @@ class MetaboliteParameterView:
         key_l = key.lower()
         if key_l == 'concentration':
             return self.concentration
+        if key_l == 'lorentzian':
+            return self.lorentzian
         if key_l in _PER_LINE_FAMILIES:
             return self._tensor[:, self._line_column(_PER_LINE_FAMILIES[key_l])]
         if key_l in _NOT_YET_MODELED:
@@ -154,16 +175,21 @@ class ParameterRegistry:
     that supports ``params["NAA"]["concentration"]``-style access.
     """
 
-    def __init__(self, index: Dict[str, IndexValue], metabolite_names: List[str]):
+    def __init__(self, index: Dict[str, IndexValue], metabolite_names: List[str], num_spins: int = 1):
         self.index: Dict[str, IndexValue] = dict(index)
         self.metabolite_names: List[str] = list(metabolite_names)
         self._metabolite_pos = {m.lower(): i for i, m in enumerate(self.metabolite_names)}
+        # v2.0 (handover section 18 follow-up): see
+        # MetaboliteParameterView's own num_spins comment. 1 for every
+        # basis set shipped today.
+        self.num_spins: int = num_spins
 
     @classmethod
     def from_physics_model(cls, pm) -> 'ParameterRegistry':
         """Build a registry from an initialized ``PhysicsModel`` instance."""
         metab_names, _ = pm.metab
-        return cls(index=pm.index, metabolite_names=metab_names)
+        return cls(index=pm.index, metabolite_names=metab_names,
+                   num_spins=getattr(pm, 'num_spins', 1))
 
     def is_metabolite(self, name: str) -> bool:
         return name.lower() in self._metabolite_pos
@@ -186,6 +212,7 @@ class ParameterRegistry:
         out: List[Optional[str]] = [None] * n
 
         per_line_ind_keys = set(_PER_LINE_FAMILIES.values())
+        lorentzian_key = _PER_LINE_FAMILIES['lorentzian']
 
         for name, cols in self.index.items():
             if name in _AGGREGATE_KEYS:
@@ -194,7 +221,17 @@ class ParameterRegistry:
                 out[cols] = f'{name}.concentration'
                 continue
             if isinstance(cols, tuple):
-                if name in per_line_ind_keys and len(cols) == len(self.metabolite_names):
+                if name == lorentzian_key and len(cols) == len(self.metabolite_names) * self.num_spins:
+                    # v2.0 (handover section 18 follow-up): 'd' has
+                    # num_spins columns per line when num_spins>1 (dormant
+                    # today -- see MetaboliteParameterView). Label each as
+                    # '<metab>.d[<moiety>]' instead of the generic
+                    # 'd[<flat index>]' fallback below.
+                    for col_pos, col in enumerate(cols):
+                        line_pos, moiety_pos = divmod(col_pos, self.num_spins)
+                        suffix = f'.{name}' if self.num_spins == 1 else f'.{name}[{moiety_pos}]'
+                        out[col] = f'{self.metabolite_names[line_pos]}{suffix}'
+                elif name in per_line_ind_keys and len(cols) == len(self.metabolite_names):
                     for pos, col in enumerate(cols):
                         out[col] = f'{self.metabolite_names[pos]}.{name}'
                 else:
@@ -247,7 +284,8 @@ class SimulationParameters:
         key_l = key.lower()
         if self.registry.is_metabolite(key_l):
             return MetaboliteParameterView(
-                self.tensor, self.registry.index, key_l, self.registry.position(key_l)
+                self.tensor, self.registry.index, key_l, self.registry.position(key_l),
+                num_spins=self.registry.num_spins,
             )
         if key_l not in self.registry.index:
             raise KeyError(f"'{key}' is not present in this SimulationParameters' registry.")
@@ -287,6 +325,7 @@ class SimulationParameters:
             'tensor': self.tensor,
             'registry_index': self.registry.index,
             'registry_metabolite_names': self.registry.metabolite_names,
+            'registry_num_spins': self.registry.num_spins,
             'baseline': self.baseline,
             'residual_water': self.residual_water,
             'metadata': self.metadata,
@@ -312,6 +351,7 @@ class SimulationParameters:
         registry = ParameterRegistry(
             index=data['registry_index'],
             metabolite_names=data['registry_metabolite_names'],
+            num_spins=data.get('registry_num_spins', 1),
         )
         return cls(
             tensor=data['tensor'],

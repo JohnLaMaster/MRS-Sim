@@ -351,3 +351,58 @@ def test_check_g_b0_double_counting_no_mm_lines():
     max_ranges[0, :] = 20.0
     with pytest.raises(ValueError):
         PhysicsModel._check_g_b0_double_counting(g_cols, n_mm_lines=0, max_ranges=max_ranges)
+
+
+# -- _pad_and_stack_moiety_lines (v2.0 handover section 18 follow-up:
+# "individual spins"/moiety-level basis functions) --------------------
+#
+# No basis set shipped today has per-moiety FID content (every real
+# .mat file's 'fid' is a flat (channels, length) array -- confirmed
+# directly), so initialize()'s moiety-aware loading branch is dead code
+# for real data. These exercise it directly with fabricated
+# (num_moieties, channels, length) tensors instead, per this file's
+# module docstring on testing basis-loading logic without a real .mat
+# file.
+
+def test_pad_and_stack_moiety_lines_equal_moiety_counts_no_padding():
+    # 2 lines, each with 2 moieties, (channels=2, length=4)
+    lines = [torch.full((2, 2, 4), 1.0), torch.full((2, 2, 4), 2.0)]
+    stacked, spins = PhysicsModel._pad_and_stack_moiety_lines(lines)
+    assert stacked.shape == (1, 2, 2, 2, 4)
+    assert spins == [2, 2]
+    assert torch.equal(stacked[0, 0], lines[0])
+    assert torch.equal(stacked[0, 1], lines[1])
+
+
+def test_pad_and_stack_moiety_lines_pads_fewer_moieties_with_zeros():
+    # line 0 has 3 moieties, line 1 has only 1 -- line 1 must be
+    # zero-padded up to 3 along the moiety axis, not the reverse.
+    lines = [torch.full((3, 2, 4), 5.0), torch.full((1, 2, 4), 9.0)]
+    stacked, spins = PhysicsModel._pad_and_stack_moiety_lines(lines)
+    assert stacked.shape == (1, 2, 3, 2, 4)
+    assert spins == [3, 1]
+    # Line 0 (more moieties) is untouched
+    assert torch.equal(stacked[0, 0], lines[0])
+    # Line 1's real moiety is preserved at position 0, positions 1-2 are zero
+    assert torch.equal(stacked[0, 1, 0], lines[1][0])
+    assert torch.equal(stacked[0, 1, 1], torch.zeros(2, 4))
+    assert torch.equal(stacked[0, 1, 2], torch.zeros(2, 4))
+
+
+def test_pad_and_stack_moiety_lines_more_moieties_padding_direction_not_reversed():
+    """
+    Regression test: the original (broken) branch's zero-padding
+    `if`/`elif` tested the identical condition twice, so a line with
+    FEWER moieties than a previously-seen larger line could never
+    actually get padded -- this would have silently produced a
+    ragged/mis-shaped stack (or crashed on `torch.stack`) instead.
+    Order here is swapped from the test above (smaller line first) to
+    make sure padding isn't accidentally direction-dependent.
+    """
+    lines = [torch.full((1, 2, 4), 9.0), torch.full((3, 2, 4), 5.0)]
+    stacked, spins = PhysicsModel._pad_and_stack_moiety_lines(lines)
+    assert stacked.shape == (1, 2, 3, 2, 4)
+    assert spins == [1, 3]
+    assert torch.equal(stacked[0, 0, 0], lines[0][0])
+    assert torch.equal(stacked[0, 0, 1], torch.zeros(2, 4))
+    assert torch.equal(stacked[0, 1], lines[1])

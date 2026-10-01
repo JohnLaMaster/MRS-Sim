@@ -9,6 +9,8 @@ from src.metabolite_database import (
     MoietyRangeError,
     apply_range_overrides,
     get_concentration_range,
+    get_moiety_names,
+    get_moiety_t2_range,
     get_omega,
     get_t1_range,
     get_t2_range,
@@ -47,6 +49,24 @@ GABA_LIKE = {
         'T2': {'spins': {'min': [200], 'max': [300]}, 'metab': {'min': [200], 'max': [300]}},
         'T1': {'spins': {'min': [1100], 'max': [1500]}, 'metab': {'min': [1100], 'max': [1500]}},
         'Conc': {'min': [0.1], 'max': [1.0]},
+    },
+    # GSH-shaped fixture (real database values) for the moiety-level
+    # helpers: 3 moieties (gly/cys/glu) spanning 11 spin positions.
+    'gsh_like': {
+        'omega': [3.769, 7.514, 4.5608, 2.9264, 2.9747, 8.177, 3.769, 2.159, 2.145, 2.51, 2.56],
+        'spin_labels': ['gsh376a', 'gsh751', 'gsh456', 'gsh292', 'gsh297', 'gsh817',
+                         'gsh376b', 'gsh3215', 'gsh214', 'gsh251', 'gsh256'],
+        'moieties': {
+            'gly': ['gsh376a', 'gsh751'],
+            'cys': ['gsh456', 'gsh292', 'gsh297', 'gsh817'],
+            'glu': ['gsh376b', 'gsh3215', 'gsh214', 'gsh251', 'gsh256'],
+        },
+        'T2': {
+            'spins': {'min': [38, 38, 33, 33, 33, 33, 34, 34, 34, 34, 34],
+                      'max': [188.36, 188.36, 188.36, 188.36, 188.36, 188.36, 225, 225, 225, 225, 225]},
+            'metab': {'min': [33], 'max': [225]},
+        },
+        'Conc': {'min': [0.5], 'max': [3.5]},
     },
 }
 
@@ -173,6 +193,41 @@ def test_real_database_has_t1_schema_placeholder_for_every_metabolite():
         }, f"'{name}': unexpected T1 placeholder shape {entry['T1']!r}"
         with pytest.raises(MoietyRangeError):
             get_t1_range(db, name, level='metab')
+
+
+def test_get_moiety_names_returns_database_order():
+    assert get_moiety_names(GABA_LIKE, 'gsh_like') == ['gly', 'cys', 'glu']
+
+
+def test_get_moiety_names_missing_raises():
+    with pytest.raises(MoietyRangeError):
+        get_moiety_names(GABA_LIKE, 'gaba')  # no 'moieties' entry in this fixture
+
+
+def test_get_moiety_t2_range_single_spin_moiety():
+    # 'gly' = ['gsh376a', 'gsh751'] -> spin indices 0, 1 -> T2.spins
+    # min/max [38, 38] / [188.36, 188.36]
+    lo, hi = get_moiety_t2_range(GABA_LIKE, 'gsh_like', 'gly')
+    assert (lo, hi) == (38, 188.36)
+
+
+def test_get_moiety_t2_range_multi_spin_moiety_spans_widest_range():
+    # 'cys' = indices 2-5 -> T2.spins.min [33,33,33,33], max all 188.36
+    lo, hi = get_moiety_t2_range(GABA_LIKE, 'gsh_like', 'cys')
+    assert (lo, hi) == (33, 188.36)
+    # 'glu' = indices 6-10 -> min all 34, max all 225
+    lo, hi = get_moiety_t2_range(GABA_LIKE, 'gsh_like', 'glu')
+    assert (lo, hi) == (34, 225)
+
+
+def test_get_moiety_t2_range_unknown_moiety_raises():
+    with pytest.raises(MoietyRangeError):
+        get_moiety_t2_range(GABA_LIKE, 'gsh_like', 'not_a_moiety')
+
+
+def test_get_moiety_t2_range_metabolite_without_moieties_raises():
+    with pytest.raises(MoietyRangeError):
+        get_moiety_t2_range(GABA_LIKE, 'gaba', 'gaba')
 
 
 def test_apply_range_overrides_overrides_only_specified_fields():

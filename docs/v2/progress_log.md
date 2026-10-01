@@ -2180,6 +2180,126 @@ the existing `set_parameter_constraints`/`g`/`b0`-guard tests already
 exercise the column-index machinery this touches). Full suite: 158/158
 passing; before/after numeric equivalence verified manually as above.
 
+## Milestone 29 — moiety-level 'd' sampling plumbing, dormant until a basis set has real per-moiety FIDs (commit TBD)
+
+**Handover section addressed**: 18 follow-up (the "individual spins"/
+moiety-level basis-function scaffolding flagged unfinished since the
+start of this work).
+
+**Repo owner's request**: confirm `'gmm'` is sampling-time-only (never a
+real `self.index` key read by `forward()`) -- confirmed directly,
+`forward()` only ever reads `self.index['g']`; `'gmm'` exists solely as a
+`define_parameter_ranges()` default-range-lookup name, exactly like
+`'dmm'` before Milestone 28 folded it away (see that milestone -- `'gmm'`
+is *not* folded the same way because `'g'`/`'gmm'` do need distinct
+default ranges, unlike `'d'`/`'dmm'`). Then: add moiety-level sampling
+capability -- "parameters should be sampled per moiety, not per spin...
+all moieties per metabolite should have the same concentration,
+frequency shift, and gaussian lineshape, but each moiety can have a
+separate T2, i.e., d." Per-moiety frequency-shift-vs-temperature/pH is
+explicit future work, not attempted here.
+
+**Blocking finding, surfaced to the repo owner before any code was
+written**: no basis-set `.mat` file anywhere in the repo has per-spin/
+per-moiety FID data -- every metabolite's basis FID is a flat, already-
+fully-summed `(2, length)` array (confirmed directly against 4 real
+files). There is nothing to apply a moiety-specific Lorentzian decay to
+independently per moiety with today's data; doing so for real would need
+a basis-set regeneration step (separate per-moiety spin simulation)
+outside this codebase's Python simulation layer. The repo owner chose,
+of the options presented, to build the sampling/indexing plumbing now
+(mirroring the `T1` pattern -- schema and code paths ready, inactive
+until real data exists) rather than wait or attempt a spectral-domain
+approximation.
+
+**What changed** (`src/physics_model.py`):
+- `initialize()`'s basis-loading `except` branch (meant for per-moiety
+  FIDs shaped `(num_moieties, channels, length)`, previously dead/broken
+  code -- see below) is fixed and extracted to a new static method,
+  `PhysicsModel._pad_and_stack_moiety_lines()`: stacks lines into one
+  rectangular `[1, num_bF, max_moieties, channels, length]` tensor,
+  zero-padding lines with fewer moieties than the running max. Fixed two
+  real bugs found in the original: (1) item-assignment into `torch.Size`
+  (immutable, raises `TypeError`); (2) an `if`/`elif` testing the
+  identical condition twice, so the "fewer moieties" padding branch could
+  never run. Directly unit-tested with fabricated tensors (no real
+  basis-set file has this shape yet) in
+  `tests/test_physics_model_bugfixes.py`.
+- `'d'` (Lorentzian/T2) keeps scaling with `self.num_spins` (max moiety
+  count across all lines) exactly as the existing scaffolding already
+  allowed. `'g'` (Gaussian), `'fshiftmet'`/`'fshiftmm'` (frequency shift)
+  **no longer** scale with `self.num_spins` -- they were previously
+  multiplied by it like `'d'`, which was harmless today (`num_spins` is
+  always 1 for every shipped basis set) but would have allocated a
+  separate `'g'`/frequency-shift per moiety instead of sharing one across
+  a metabolite's moieties, the moment a basis set made `num_spins>1`.
+  Corrected ahead of that, per the repo owner's explicit requirement.
+- Fixed a latent column-offset bug this decoupling would otherwise have
+  inherited: the `cnt()` counter seeding the back half of the column
+  layout assumed the metabolite/`'d'`/`'g'` blocks were all the same
+  size (`3 * num_bF * num_spins`), which only holds when `num_spins==1`;
+  now computed explicitly from the metabolite block's and `'d'`'s actual
+  (possibly different) sizes.
+- `define_parameter_ranges()`'s `'d'` branch now maps a header column
+  back to `(line, moiety-within-line)` via `self.num_spins`/`self._spins`
+  instead of a flat per-line subtraction that silently assumed
+  `num_spins==1`; for a real (non-padding) moiety slot on a multi-moiety
+  line, it pulls that specific moiety's own T2 range from the database
+  (`moieties`/`spin_labels`/`T2.spins`, via two new
+  `src/metabolite_database.py` helpers, `get_moiety_names()` and
+  `get_moiety_t2_range()`) instead of the metabolite-wide range. Falls
+  through to the existing metabolite-level T2 logic unchanged whenever
+  `num_spins==1` or a slot is a zero-padded non-real moiety -- i.e.
+  always, for every basis set shipped today.
+- `lineshape_correction()`'s parameter-reshape step now reshapes `'d'`
+  and `'g'` differently for the 5-D (moiety) case: `'d'` keeps its own
+  moiety axis (`[b, lines, moieties, 1, 1]`), `'g'` reshapes to
+  `[b, lines, 1, 1, 1]` and relies on ordinary broadcasting against
+  `fid`'s real moiety axis instead of being tiled into one.
+- `forward()`'s `V1_0=False` T2*-amplitude-scaling step (reads `'d'`
+  directly to compute `T2*`) would otherwise shape-mismatch against the
+  metabolite-level amplitude tensor once `'d'` has more columns than
+  lines; now averages across each line's moiety columns first when
+  `num_spins>1`.
+
+**What changed** (`src/parameters.py`): `ParameterRegistry` and
+`MetaboliteParameterView` gained `num_spins` awareness (plumbed through
+`from_physics_model()`, `save()`/`load()`). `.lorentzian` returns all of
+a line's moiety columns (shape `[batch, num_spins]`) when `num_spins>1`,
+a single column (shape `[batch]`, identical to before) when `num_spins==1`.
+`.gaussian`/`.frequency_shift` are unaffected (never moiety-scaled).
+`labels()` annotates `'d'` columns as `'<metab>.d[<moiety>]'` instead of
+the generic `'d[<flat index>]'` fallback when `num_spins>1`.
+
+**Verified as a true no-op for every basis set shipped today**: saved
+`min_ranges`/`max_ranges`/`index`/`spins`/`num_spins`, and a full
+`forward()` output (fixed seed, `cows.json` -- 20 metabolites + 8 MM/Lip
+lines) from the real basis set *before* this change (via `git stash`)
+and compared against the same after -- all **bit-identical**
+(`torch.equal`/`np.array_equal` true, not just `allclose`). Confirms
+every change here is dormant for real data, exactly as intended.
+
+**New synthetic-data tests** (no real per-moiety-FID basis set exists to
+test against, so these fabricate the shapes directly, matching this
+repo's existing convention for untestable-without-real-data basis logic
+-- see `test_parameters.py`'s and `test_physics_model_bugfixes.py`'s
+module docstrings): `_pad_and_stack_moiety_lines()` padding/stacking
+(equal counts, fewer-moieties padding in both orderings);
+`get_moiety_names()`/`get_moiety_t2_range()` against a GSH-shaped fixture
+(3 moieties, 11 spins); `ParameterRegistry`/`MetaboliteParameterView`
+multi-column `'d'` access and labeling with a synthetic `num_spins=2`
+index. Full suite: 172/172 passing.
+
+**Known limitation, not addressed here**: `src/crlb.py`'s CRLB/FIM
+estimator assumes `len(pm.index['d']) == len(pm.index['g']) ==
+len(pm.index['f_shifts'])` (all sized from `n_lines = len(pm.index['d'])`)
+and `pm.syn_basis_fids.squeeze(0)` shaped `[n_lines, 2, L]` -- both true
+for every basis set shipped today (`num_spins==1`), but CRLB/FIM
+estimation for a moiety-level `'d'` would need its own layout/basis-
+reshape work, not attempted in this pass (not part of the repo owner's
+request here, and there is still no real per-moiety basis set to
+validate it against).
+
 ## Not yet started
 
 Handover sections 7 (SNR audit/formalization), 8 (parameter replay across

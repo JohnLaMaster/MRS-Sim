@@ -196,3 +196,78 @@ def test_save_and_load_preserves_baseline_and_metadata(tmp_path):
     assert loaded.baseline['length'] == 128
     assert loaded.metadata == {'sampler': 'UniformRangeSampler', 'seed': 7}
     assert loaded.residual_water is None
+
+
+# -- Moiety-level 'd' (v2.0 handover section 18 follow-up) -------------
+#
+# No basis set shipped today gives PhysicsModel.num_spins > 1 (every
+# real basis set's FID is pre-summed across moieties -- see
+# test_physics_model_bugfixes.py's _pad_and_stack_moiety_lines tests),
+# so this is exercised here with a synthetic index/num_spins, the same
+# way the rest of this file avoids needing a real PhysicsModel.
+#
+# 2 lines ("gsh", "naa"), num_spins=2: 'd' has 2*2=4 columns (one pair
+# per line), but 'g'/'f_shifts'/concentration stay 1 column per line --
+# per the repo owner directly, moieties of a metabolite share
+# concentration/frequency-shift/Gaussian lineshape, only 'd' (T2) varies
+# per moiety.
+MULTI_MOIETY_NAMES = ['gsh', 'naa']
+MULTI_MOIETY_INDEX = {
+    'gsh': 0,
+    'naa': 1,
+    'd': (10, 11, 12, 13),  # gsh: cols 10-11 (2 moieties), naa: cols 12-13
+    'g': (2, 3),
+    'f_shift': 4,
+    'f_shifts': (5, 6),
+    'metabolites': (0, 1),
+    'parameters': tuple(range(2, 14)),
+    'overall': tuple(range(0, 14)),
+}
+
+
+def make_multi_moiety_params(batch_size=2):
+    tensor = torch.arange(batch_size * 14, dtype=torch.float32).reshape(batch_size, 14)
+    registry = ParameterRegistry(index=MULTI_MOIETY_INDEX, metabolite_names=MULTI_MOIETY_NAMES,
+                                  num_spins=2)
+    return SimulationParameters(tensor=tensor, registry=registry)
+
+
+def test_lorentzian_returns_all_moiety_columns_when_num_spins_above_one():
+    params = make_multi_moiety_params()
+    torch.testing.assert_close(params['gsh']['lorentzian'], params.tensor[:, (10, 11)])
+    torch.testing.assert_close(params['naa']['lorentzian'], params.tensor[:, (12, 13)])
+
+
+def test_gaussian_and_frequency_shift_stay_single_column_when_num_spins_above_one():
+    # Unlike 'lorentzian', these never scale with num_spins.
+    params = make_multi_moiety_params()
+    torch.testing.assert_close(params['gsh']['gaussian'], params.tensor[:, 2])
+    torch.testing.assert_close(params['naa']['gaussian'], params.tensor[:, 3])
+    torch.testing.assert_close(params['gsh']['frequency_shift'], params.tensor[:, 5])
+    torch.testing.assert_close(params['naa']['frequency_shift'], params.tensor[:, 6])
+
+
+def test_lorentzian_single_column_when_num_spins_is_one():
+    """Default/every-shipped-basis-set case: identical to before num_spins existed."""
+    params = make_params()  # num_spins defaults to 1
+    torch.testing.assert_close(params['naa']['lorentzian'], params.tensor[:, 4])
+    assert params['naa']['lorentzian'].shape == (params.batch_size,)
+
+
+def test_labels_annotate_moiety_index_when_num_spins_above_one():
+    params = make_multi_moiety_params()
+    labels = params.labels()
+    assert labels[10] == 'gsh.d[0]'
+    assert labels[11] == 'gsh.d[1]'
+    assert labels[12] == 'naa.d[0]'
+    assert labels[13] == 'naa.d[1]'
+
+
+def test_save_and_load_roundtrip_preserves_num_spins(tmp_path):
+    params = make_multi_moiety_params()
+    path = tmp_path / 'multi_moiety_params.pt'
+    params.save(str(path))
+
+    loaded = SimulationParameters.load(str(path))
+    assert loaded.registry.num_spins == 2
+    torch.testing.assert_close(loaded['gsh']['lorentzian'], params['gsh']['lorentzian'])

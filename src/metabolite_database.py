@@ -39,6 +39,8 @@ __all__ = [
     'get_t2_range',
     'get_t1_range',
     'get_omega',
+    'get_moiety_names',
+    'get_moiety_t2_range',
     'apply_range_overrides',
 ]
 
@@ -168,6 +170,65 @@ def get_omega(db: dict, metabolite: str) -> List[float]:
     if omega is None:
         raise MoietyRangeError(f"'{metabolite}' has no 'omega' entry in the database.")
     return list(omega)
+
+
+def get_moiety_names(db: dict, metabolite: str) -> List[str]:
+    """
+    Moiety keys for ``metabolite``, in the database's fixed ordering
+    (e.g. GSH -> ``['gly', 'cys', 'glu']``). One entry per moiety-level
+    'd' (Lorentzian) column PhysicsModel allocates for this metabolite
+    when per-moiety sampling is enabled -- see
+    ``PhysicsModel.initialize()``/``define_parameter_ranges()``.
+    """
+    entry = _entry(db, metabolite)
+    moieties = entry.get('moieties')
+    if not moieties:
+        raise MoietyRangeError(f"'{metabolite}' has no 'moieties' entry in the database.")
+    return list(moieties.keys())
+
+
+def get_moiety_t2_range(db: dict, metabolite: str, moiety: str) -> Tuple[float, float]:
+    """
+    T2 range (ms, ``(min, max)``) for one moiety of ``metabolite``,
+    aggregated across that moiety's constituent spins.
+
+    Resolves ``moiety``'s spin labels (``moieties[moiety]``) to their
+    positions in ``spin_labels`` (the array parallel to ``omega``/
+    ``T2.spins``), then returns the widest T2 range spanned by those
+    positions: ``(min(T2.spins.min[i]), max(T2.spins.max[i]))`` over the
+    moiety's spin indices ``i``. This is a deliberately coarse per-moiety
+    range (not a per-spin distribution) to match the repo owner's
+    request that moieties -- not individual spins -- are the sampling
+    granularity for now (see docs/v2/progress_log.md).
+
+    Raises ``MoietyRangeError`` if the metabolite has no
+    ``moieties``/``spin_labels``/``T2.spins`` data, or if a moiety's spin
+    label isn't found in ``spin_labels`` -- never fabricates a range.
+    """
+    entry = _entry(db, metabolite)
+    moieties = entry.get('moieties')
+    spin_labels = entry.get('spin_labels')
+    if not moieties or not spin_labels:
+        raise MoietyRangeError(
+            f"'{metabolite}' has no 'moieties'/'spin_labels' entry in the database."
+        )
+    if moiety not in moieties:
+        raise MoietyRangeError(f"'{metabolite}' has no moiety named '{moiety}'.")
+    label_to_index = {label: i for i, label in enumerate(spin_labels)}
+    try:
+        indices = [label_to_index[label] for label in moieties[moiety]]
+    except KeyError as exc:
+        raise MoietyRangeError(
+            f"'{metabolite}': moiety '{moiety}' references spin label {exc} "
+            f"that is not in 'spin_labels'."
+        ) from exc
+    t2_mins, t2_maxs = get_t2_range(db, metabolite, level='spins')
+    if max(indices) >= len(t2_mins):
+        raise MoietyRangeError(
+            f"'{metabolite}': moiety '{moiety}' references a spin index "
+            f"out of range for T2.spins (length {len(t2_mins)})."
+        )
+    return min(t2_mins[i] for i in indices), max(t2_maxs[i] for i in indices)
 
 
 def apply_range_overrides(db: dict, overrides: dict) -> dict:

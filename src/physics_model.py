@@ -185,36 +185,51 @@ class PhysicsModel(nn.Module):
 
         # # Compile the selected basis functionss
         try:
-            # If basis functions are summed spins
+            # If basis functions are pre-summed across spins/moieties
+            # (every real basis set so far): one flat (channels, length)
+            # FID per line.
             self.syn_basis_fids = torch.stack([torch.as_tensor(
-                self.basisFcns['metabolites'][m.lower()]['fid'], 
+                self.basisFcns['metabolites'][m.lower()]['fid'],
                 dtype=torch.float32) for m in self._metab], dim=0).unsqueeze(0)
             self._spins = [1] * self.syn_basis_fids.shape[1]
-        except:
-            # If basis functions are individual spins
-            # TODO: Not finished!!!
-            self._spins = []
-            for i, m in enumerate(self._metab):
-                temp = torch.as_tensor(self.basisFcns['metabolites'][m.lower()]['fid']).unsqueeze(0)
-                if i==0:
-                    self.syn_basis_fids = temp # torch.Size([1, spins, channels, spec_length])
-                    self._spins.append(temp.shape[1])
-                else:
-                    s_t, s_ref = temp.shape, self.syn_basis_fids.shape
-                    self._spins.append(temp.shape[1])
-                    if s_t[1]>s_ref[1]: 
-                        # If the new metabolite has more spins than previous metabolites,
-                        # then zero-pad the basis set
-                        s_ref[1] = s_t[1] - s_ref[1]
-                        self.syn_basis_fids = torch.cat([self.syn_basis_fids,
-                                                         torch.zeros(s_ref)], dim=1)
-                    elif s_t[1]>s_ref[1]:
-                        # If the new metabolite has fewer spins, then sero-pad the new one
-                        s_t[1] = s_ref[1] - s_t[1]
-                        temp = torch.cat([temp, torch.zeros(s_t)], dim=1)
-                    # Add the new metabolite to the basis set
-                    self.syn_basis_fids = torch.cat([self.syn_basis_fids, temp], dim=0)
+        except Exception:
+            # v2.0 (handover section 18 follow-up, "individual spins"/
+            # moiety-level basis functions): each line's 'fid' here is
+            # (num_moieties, channels, length) instead of (channels,
+            # length) -- not exercised by any basis set shipped today
+            # (confirmed directly: every current .mat file's 'fid' is a
+            # flat (2, length) array, so this branch is presently dead
+            # code for real data), but this is the loader for the day a
+            # basis set with real per-moiety FID content exists.
+            #
+            # Fixed two bugs in this branch (previously unreachable/
+            # untested given the above): (1) it tried to item-assign into
+            # `torch.Size`, which is an immutable tuple subclass and
+            # raises TypeError the moment this path is actually hit; (2)
+            # the zero-padding `if`/`elif` tested the identical condition
+            # twice, so the "new line has fewer moieties" branch could
+            # never run. Lines with fewer moieties than the running max
+            # are now zero-padded along the moiety axis so every line can
+            # be stacked into one rectangular
+            # [1, num_bF, max_moieties, channels, length] tensor.
+            # self._spins records each line's REAL (pre-padding) moiety
+            # count, consumed below and in define_parameter_ranges()/
+            # sampling to know how many of a line's padded moiety slots
+            # are real.
+            lines = [torch.as_tensor(self.basisFcns['metabolites'][m.lower()]['fid'],
+                                      dtype=torch.float32) for m in self._metab]
+            self.syn_basis_fids, self._spins = self._pad_and_stack_moiety_lines(lines)
 
+        # v2.0 (handover section 18 follow-up): 'd' (Lorentzian decay) is
+        # sampled per moiety -- self._num_spins (max moiety count across
+        # all lines) sizes its column block below -- while concentration/
+        # 'g'/frequency-shift stay per-metabolite-line regardless of
+        # moiety count, per the repo owner directly ("All moieties per
+        # metabolite should have the same concentration, frequency
+        # shift, and gaussian lineshape, but each moiety can have a
+        # separate T2"). self._num_spins is 1 for every basis set shipped
+        # today (see above), so this is a no-op until real per-moiety FID
+        # data exists.
         num_lines = copy.copy(num_bF)
         self._num_spins = max(self.spins)
         if self.syn_basis_fids.ndim==5:
@@ -308,7 +323,18 @@ class PhysicsModel(nn.Module):
         # `header` for column-range labeling; aliasing previously mutated
         # self._metab in place, silently polluting pm.metab/pm._metab with
         # non-metabolite names for the lifetime of the model.
-        header, cnt = list(self._metab), counter(start=int(3 * num_bF * self.num_spins) - 1)
+        # v2.0 (handover section 18 follow-up): the column layout is
+        # [metabolites (num_bF)] [d (num_lines, moiety-aware)] [g
+        # (num_bF, metabolite-level -- see below)] [[everything cnt()
+        # hands out from here]]. Previously this start value assumed all
+        # three blocks were the same size (3 * num_bF * num_spins), which
+        # only holds when num_spins==1 (true for every basis set shipped
+        # today); it undercounts the real offset the moment 'd' and 'g'
+        # have different widths, leaving a gap of unused/aliased columns
+        # between the metabolite block and 'd'. Computed explicitly from
+        # the two blocks' actual sizes instead so it stays correct once a
+        # basis set with real per-moiety FIDs makes num_spins>1.
+        header, cnt = list(self._metab), counter(start=int(num_bF + num_lines + num_bF) - 1)
         g = 1 if not self.MM else 2
         names = []; #['d',   'dmm', 'g',   'gmm', 'fshift']#, 'snr', 'phi0', 'phi1']
         mult  = []; #[  l, self.MM,   l, self.MM,        1]#,     1,      1,      1] 
@@ -350,12 +376,23 @@ class PhysicsModel(nn.Module):
         # unchanged (l*num_spins + MM*num_spins is exactly what
         # self.index['d']'s own construction, elsewhere in this method,
         # already expects).
-        names.append('d'),                  mult.append(l*self.num_spins + self.MM*self.num_spins)
-        names.append('g'),                  mult.append(l*self.num_spins)
-        names.append('gmm'),                mult.append(self.MM*self.num_spins)
+        names.append('d'),                  mult.append(num_lines)
+        # v2.0 (handover section 18 follow-up): 'g' (Gaussian lineshape),
+        # 'fshiftmet'/'fshiftmm' (frequency shift) no longer scale with
+        # moiety count -- per the repo owner directly, every moiety of a
+        # given metabolite shares one concentration, one frequency shift,
+        # and one Gaussian lineshape value; only 'd' (Lorentzian decay,
+        # i.e. T2) is sampled per moiety. These were previously multiplied
+        # by self.num_spins like 'd', which is harmless today (num_spins
+        # is always 1 for every shipped basis set) but would have been
+        # wrong -- allocating a separate 'g'/fshift per moiety instead of
+        # sharing one across a metabolite's moieties -- the moment a
+        # basis set with real per-moiety FIDs made num_spins>1.
+        names.append('g'),                  mult.append(l)
+        names.append('gmm'),                mult.append(self.MM)
         names.append('fshift'),             mult.append(1)
-        names.append('fshiftmet'),          mult.append(l*self.num_spins)
-        names.append('fshiftmm'),           mult.append(self.MM*self.num_spins)
+        names.append('fshiftmet'),          mult.append(l)
+        names.append('fshiftmm'),           mult.append(self.MM)
         names.append('snr'),                mult.append(1)
         names.append('phi0'),               mult.append(1)
         names.append('phi1'),               mult.append(1)
@@ -394,14 +431,23 @@ class PhysicsModel(nn.Module):
         # Begin defining the indices of each variable
         # # Metabolites - one amplitude per metabolite
         ind = list(int(x) for x in torch.arange(0,num_bF))
-        
-        # # Line shape corrections - Lorenztian and Gaussian - one per spin
-        ind.append(tuple(int(x) for x in torch.arange(0,num_lines) + num_lines))   
-        ind.append(tuple(int(x) for x in torch.arange(0,num_lines) + 2*num_lines)) 
 
-        # # Frequency Shift
-        ind.append(cnt(1))                                  # Global fshift
-        ind.append(tuple(cnt(1) for _ in range(num_lines))) # Individual fshifts
+        # # Line shape corrections: Lorentzian ('d') is sampled per moiety
+        # (num_lines = num_bF * self._num_spins columns); Gaussian ('g')
+        # stays per metabolite/MM-line regardless of moiety count
+        # (num_bF columns) -- see the names/mult block above for why.
+        # These are different widths in general, so 'g' is offset by
+        # num_bF (metabolites) + num_lines ('d'), not 2*num_lines.
+        ind.append(tuple(int(x) for x in torch.arange(0,num_lines) + num_bF))
+        ind.append(tuple(int(x) for x in torch.arange(0,num_bF) + num_bF + num_lines))
+
+        # # Frequency Shift -- also per metabolite/MM-line, not per moiety
+        # (see above); cnt() already starts right after the 'g' block
+        # (num_bF + num_lines + num_bF columns in, from this method's
+        # `counter(start=...)` call), so this continues correctly
+        # regardless of whether num_lines == num_bF or not.
+        ind.append(cnt(1))                                # Global fshift
+        ind.append(tuple(cnt(1) for _ in range(num_bF)))  # Individual fshifts
         
         # # Noise
         ind.append(cnt(1)) # SNR
@@ -499,35 +545,71 @@ class PhysicsModel(nn.Module):
                 # 'd' in initialize() -- see that comment); this branch
                 # already treated 'd' and 'dmm' identically via the same
                 # positional offset below, so nothing else here changes.
-                # print(i, m, num_mets, i-num_mets, header[i-num_mets])
-                met = header[i-num_mets]
-                try:
-                    t2 = self.ranges[met.lower()]['T2']['metab']
-                    # BUGFIX (v2.0): 'd' is a Lorentzian decay RATE applied
-                    # as exp(-d * self.t), with self.t in SECONDS (verified
-                    # directly: self.t's range matches Ns/spectralwidth,
-                    # e.g. ~0.68s for a typical config) -- but T2.metab's
-                    # min/max are literally T2 relaxation times in
-                    # MILLISECONDS (e.g. NAA: 242.7-320.17). Using those
-                    # values directly as 'd' (as this branch did before)
-                    # made every sampled decay rate ~1000x too large,
-                    # decaying the FID to ~0 within microseconds instead of
-                    # over the actual readout window -- effectively erasing
-                    # every metabolite sampled through this default range
-                    # (the copula-based sampler in sim_COWS.py bypasses
-                    # this entirely by setting 'd' from real fitted
-                    # in-vivo values, which is presumably why this had gone
-                    # unnoticed). Convert to a proper decay-rate range
-                    # (rate = 1000 / T2_ms, i.e. 1/T2 in seconds); a larger
-                    # T2 (slower decay) correctly maps to a smaller rate,
-                    # so min/max invert.
-                    t2_min_ms = t2['min'][0] if isinstance(t2['min'], (list, tuple)) else t2['min']
-                    t2_max_ms = t2['max'][0] if isinstance(t2['max'], (list, tuple)) else t2['max']
-                    temp = {'min': 1000.0 / t2_max_ms, 'max': 1000.0 / t2_min_ms}
-                except:
-                    temp = {}
-                    temp['min'] = 0
-                    temp['max'] = 1
+                #
+                # v2.0 (handover section 18 follow-up): 'd' is the one
+                # per-line family that can have more than one column per
+                # metabolite line -- self._num_spins columns per line,
+                # rectangular/zero-padded to the max real moiety count
+                # across all lines (see initialize()). Map this header
+                # position back to (line, moiety-within-line) via
+                # self._num_spins rather than the flat per-line
+                # subtraction this branch used to do -- that only ever
+                # happened to give the right answer because
+                # self._num_spins is 1 for every basis set shipped today
+                # (so line_idx == d_pos == i-num_mets exactly as before).
+                d_pos = i - num_mets
+                line_idx, moiety_idx = divmod(d_pos, self._num_spins)
+                met = header[line_idx]
+                real_moiety_count = self._spins[line_idx] if line_idx < len(self._spins) else 1
+                temp = {}
+                if real_moiety_count > 1 and moiety_idx < real_moiety_count:
+                    # A real (non-padding) moiety slot on a multi-moiety
+                    # line -- use that moiety's own T2 range (database
+                    # 'moieties'/'T2.spins') instead of the metabolite-
+                    # wide one. Not exercised by any basis set shipped
+                    # today (self._num_spins is always 1 -- see above);
+                    # ready for the day a basis set supplies real
+                    # per-moiety FIDs.
+                    try:
+                        from .metabolite_database import get_moiety_names, get_moiety_t2_range
+                        moiety_name = get_moiety_names(self.ranges, met)[moiety_idx]
+                        t2_min_ms, t2_max_ms = get_moiety_t2_range(self.ranges, met, moiety_name)
+                        temp = {'min': 1000.0 / t2_max_ms, 'max': 1000.0 / t2_min_ms}
+                    except Exception:
+                        temp = {'min': 0, 'max': 1}
+                if not temp:
+                    # Metabolite-level fallback -- the only path exercised
+                    # by any basis set shipped today (one moiety per line,
+                    # or a zero-padded non-real moiety slot).
+                    try:
+                        t2 = self.ranges[met.lower()]['T2']['metab']
+                        # BUGFIX (v2.0): 'd' is a Lorentzian decay RATE
+                        # applied as exp(-d * self.t), with self.t in
+                        # SECONDS (verified directly: self.t's range
+                        # matches Ns/spectralwidth, e.g. ~0.68s for a
+                        # typical config) -- but T2.metab's min/max are
+                        # literally T2 relaxation times in MILLISECONDS
+                        # (e.g. NAA: 242.7-320.17). Using those values
+                        # directly as 'd' (as this branch did before) made
+                        # every sampled decay rate ~1000x too large,
+                        # decaying the FID to ~0 within microseconds
+                        # instead of over the actual readout window --
+                        # effectively erasing every metabolite sampled
+                        # through this default range (the copula-based
+                        # sampler in sim_COWS.py bypasses this entirely by
+                        # setting 'd' from real fitted in-vivo values,
+                        # which is presumably why this had gone
+                        # unnoticed). Convert to a proper decay-rate range
+                        # (rate = 1000 / T2_ms, i.e. 1/T2 in seconds); a
+                        # larger T2 (slower decay) correctly maps to a
+                        # smaller rate, so min/max invert.
+                        t2_min_ms = t2['min'][0] if isinstance(t2['min'], (list, tuple)) else t2['min']
+                        t2_max_ms = t2['max'][0] if isinstance(t2['max'], (list, tuple)) else t2['max']
+                        temp = {'min': 1000.0 / t2_max_ms, 'max': 1000.0 / t2_min_ms}
+                    except:
+                        temp = {}
+                        temp['min'] = 0
+                        temp['max'] = 1
             elif m in self.basisFcns['artifacts'].keys(): 
                 temp = self.basisFcns['artifacts'][m]
             elif m in ['fshiftmet','fshiftmm']:
@@ -1253,6 +1335,37 @@ class PhysicsModel(nn.Module):
         return enabled, TR, flip_angle, t1_values
 
     @staticmethod
+    def _pad_and_stack_moiety_lines(lines: List[torch.Tensor]) -> Tuple[torch.Tensor, List[int]]:
+        '''
+        Stack per-line individual-spin/moiety basis FIDs -- each
+        `lines[i]` shaped `(num_moieties_i, channels, length)` -- into one
+        rectangular `[1, num_bF, max_moieties, channels, length]` tensor,
+        zero-padding any line with fewer moieties than the running max
+        along the moiety axis. Returns that tensor and each line's REAL
+        (pre-padding) moiety count, in the same order as `lines`.
+
+        Extracted from `initialize()`'s basis-loading `except` branch as a
+        static method for direct testability without a real basis-set
+        file with per-moiety FID content (none exists yet -- see
+        `initialize()`'s comment at that call site). Fixes two bugs that
+        branch had before extraction: (1) item-assigning into
+        `torch.Size` (an immutable tuple subclass) to compute a pad
+        shape, which raised `TypeError`; (2) an `if`/`elif` that tested
+        the identical condition twice, so the "this line has fewer
+        moieties than the running max" branch could never run.
+        '''
+        spins = [int(line.shape[0]) for line in lines]
+        max_moieties = max(spins)
+        padded = []
+        for line in lines:
+            pad_amount = max_moieties - line.shape[0]
+            if pad_amount > 0:
+                pad_shape = (pad_amount,) + tuple(line.shape[1:])
+                line = torch.cat([line, torch.zeros(pad_shape, dtype=line.dtype)], dim=0)
+            padded.append(line)
+        return torch.stack(padded, dim=0).unsqueeze(0), spins
+
+    @staticmethod
     def _apply_t1_scaling(amp: torch.Tensor,
                           t1_values_ms: torch.Tensor,
                           TR_ms: float,
@@ -1383,14 +1496,22 @@ class PhysicsModel(nn.Module):
         value. Fat- and Water-based peaks use one Gaussian value per group.
         '''
         s = fid.shape
-        if fid.ndim==5: # individual spins
-            new_shape = [s[0], s[1], s[2], 1, 1]
-        elif fid.ndim==4: # summed spins
-            new_shape = [s[0], s[1], 1, 1]
+        if fid.ndim==5: # individual spins/moieties
+            # v2.0 (handover section 18 follow-up): 'd' has one column
+            # per moiety (matches fid's moiety axis, s[2]) but 'g' has
+            # only one column per metabolite/MM-line, shared across that
+            # line's moieties -- see initialize()'s names/mult comment.
+            # 'g' is reshaped WITHOUT a moiety axis of its own (size 1,
+            # not s[2]) and relies on ordinary broadcasting against fid's
+            # real moiety axis, rather than being tiled into one.
+            d_shape = [s[0], s[1], s[2], 1, 1]
+            g_shape = [s[0], s[1], 1, 1, 1]
+        elif fid.ndim==4: # summed spins/moieties
+            d_shape = g_shape = [s[0], s[1], 1, 1]
 
         # Reshape the parameters
-        if not isinstance(d, type(None)): d = d.view(new_shape).repeat_interleave(repeats=2, dim=-2)
-        if not isinstance(g, type(None)): g = g.view(new_shape).repeat_interleave(repeats=2, dim=-2)
+        if not isinstance(d, type(None)): d = d.view(d_shape).repeat_interleave(repeats=2, dim=-2)
+        if not isinstance(g, type(None)): g = g.view(g_shape).repeat_interleave(repeats=2, dim=-2)
 
 
         if 'gaussian' in  self.lineshape_type:
@@ -1987,6 +2108,17 @@ class PhysicsModel(nn.Module):
             # echo time the basis functions were actually simulated at.
             TE_seconds = self.TE / 1000.0
             d_per_line = params[:,self.index['d']]
+            if self._num_spins > 1:
+                # v2.0 (handover section 18 follow-up): 'd' has one
+                # column per moiety when self._num_spins>1 (not exercised
+                # by any basis set shipped today -- see initialize()),
+                # but 'amp'/concentration stays one column per
+                # metabolite/MM-line. Average across each line's moiety
+                # columns to get one representative T2*-decay value per
+                # line, matching amp's shape -- a reasonable reduction
+                # since this term scales the metabolite-level amplitude,
+                # not an individual moiety's.
+                d_per_line = d_per_line.view(d_per_line.shape[0], -1, self._num_spins).mean(dim=-1)
             amp = amp * t2_star_decay(TE=TE_seconds, T2_star=1.0 / d_per_line)
         if self.t1_enabled:
             # Handover section 10, repo-owner-requested T1/T1* config
