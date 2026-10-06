@@ -63,7 +63,7 @@ def batch_smooth(x: torch.Tensor,
         window_len = window_len.repeat(x.shape[1], 1, 1)
 
     w_len = (x.shape[-1] * window_len).int()
-    mx, threshold = w_len.max().item(), torch.div(w_len.squeeze(), 2, 
+    mx, threshold = w_len.max().item(), torch.div(w_len.reshape(-1), 2, 
                                                     rounding_mode='floor')
     even = mx if mx % 2 == 0 else mx + 1
 
